@@ -1,9 +1,10 @@
 "use client";
 
-import { Archive, BookmarkPlus, Trash2 } from "lucide-react";
+import { Archive, BookmarkPlus, Download, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { formatPercent, formatTick } from "@/lib/format";
+import { downloadRunReport } from "@/lib/snapshot-export";
 import { summarizeSnapshotRun, type ArchivedRunSummary } from "@/store/run-archive";
 import type { SimulationSnapshot } from "@/types/simulation";
 
@@ -28,7 +29,16 @@ export function RunArchivePanel({
         icon={<Archive />}
         description="Runs are archived automatically on reset or scenario switch (in-memory for this session)"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 border-line text-xs"
+              onClick={() => downloadRunReport(snapshot, archive)}
+            >
+              <Download />
+              Export JSON
+            </Button>
             <Button
               variant="outline"
               size="sm"

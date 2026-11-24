@@ -34,14 +34,13 @@ export function LandingPage() {
       const progress = totalHeight > 0 ? Math.min(Math.max(scrollY / totalHeight, 0), 1) : 0;
       setScrollProgress(progress);
 
-      // Section calculation based on scroll offset
+      // Section calculation using bounding rect relative to the active viewport
       const sections = ["hero", "platform", "fleet", "technology", "final"];
-      const sectionElements = sections.map((id) => document.getElementById(id));
-      const currentScroll = scrollY + window.innerHeight * 0.35;
+      const threshold = window.innerHeight * 0.4;
 
-      for (let i = sectionElements.length - 1; i >= 0; i--) {
-        const el = sectionElements[i];
-        if (el && el.offsetTop <= currentScroll) {
+      for (let i = sections.length - 1; i >= 0; i--) {
+        const el = document.getElementById(sections[i]);
+        if (el && el.getBoundingClientRect().top <= threshold) {
           setActiveSection(sections[i]);
           break;
         }
