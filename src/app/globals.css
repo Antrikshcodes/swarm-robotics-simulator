@@ -208,3 +208,9 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Fleet portrait scan line (robot face cards). */
+@keyframes scanline {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(var(--scan-distance, 220px)); }
+}
