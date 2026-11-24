@@ -61,9 +61,13 @@ async function runSuite() {
     // ------------------------------------------------------------------ 1. Route & Responsive Smoke
     const desktopCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const dPage = await desktopCtx.newPage();
-    dPage.on("pageerror", (e) => errors.push(`desktop pageerror: ${e.message}`));
+    dPage.on("pageerror", (e) => {
+      const msg = `desktop pageerror [${dPage.url()}]: ${e.stack || e.message}`;
+      console.error("  !", msg.split("\n").slice(0, 3).join(" | "));
+      errors.push(msg);
+    });
     dPage.on("console", (msg) => {
-      if (msg.type() === "error") errors.push(`desktop console.error: ${msg.text()}`);
+      if (msg.type() === "error") errors.push(`desktop console.error [${dPage.url()}]: ${msg.text()}`);
     });
 
     for (const route of ROUTES) {
@@ -80,9 +84,13 @@ async function runSuite() {
       hasTouch: true,
     });
     const mPage = await mobileCtx.newPage();
-    mPage.on("pageerror", (e) => errors.push(`mobile pageerror: ${e.message}`));
+    mPage.on("pageerror", (e) => {
+      const msg = `mobile pageerror [${mPage.url()}]: ${e.stack || e.message}`;
+      console.error("  !", msg.split("\n").slice(0, 3).join(" | "));
+      errors.push(msg);
+    });
     mPage.on("console", (msg) => {
-      if (msg.type() === "error") errors.push(`mobile console.error: ${msg.text()}`);
+      if (msg.type() === "error") errors.push(`mobile console.error [${mPage.url()}]: ${msg.text()}`);
     });
 
     for (const route of ROUTES) {
@@ -107,7 +115,14 @@ async function runSuite() {
       await dPage.getByRole("button", { name: /Step one tick/i }).click();
     }
     await dPage.getByText(/DL-0001/i).first().waitFor();
-    console.log("✓ Simulation Studio step, scenario switch & deadlock detection verified");
+
+    // Toggle 3D -> 2D -> 3D view and confirm both studio renderers work without DOM errors
+    await dPage.getByRole("radio", { name: /2d view/i }).click();
+    await dPage.getByRole("application", { name: /Warehouse canvas/i }).waitFor();
+    await dPage.getByRole("button", { name: /Step one tick/i }).click();
+    await dPage.getByRole("radio", { name: /3d view/i }).click();
+    await dPage.getByRole("application", { name: /3D warehouse/i }).waitFor();
+    console.log("✓ Simulation Studio 3D/2D views, step, scenario switch & deadlock detection verified");
 
     // ------------------------------------------------------------------ 3. Robot Fault Injection, Restore & Incidents
     await dPage.locator('nav a[href="/fleet"]').click();
@@ -145,6 +160,8 @@ async function runSuite() {
     await dPage.getByLabel("Inspect robot timeline").selectOption("R-01");
     await dPage.getByRole("button", { name: /Save snapshot/i }).click();
     await dPage.getByText(/RUN-\d+/).first().waitFor();
+    await dPage.getByRole("button", { name: /Export JSON/i }).waitFor();
+    await dPage.getByRole("button", { name: /^Clear \(\d+\)$/i }).click();
     console.log("✓ Analytics robot timeline & cross-scenario run archive verified");
 
     // ------------------------------------------------------------------ 6. Judge Demo Mode

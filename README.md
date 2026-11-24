@@ -2,11 +2,11 @@
 
 > **One warehouse. Multiple robots. Zero collisions.**
 
-[![Build & Tests](https://img.shields.io/badge/Vitest-196%20Passed-emerald.svg)](vitest.config.ts)
+[![Build & Tests](https://img.shields.io/badge/Vitest-255%20Passed-emerald.svg)](vitest.config.ts)
 [![Next.js](https://img.shields.io/badge/Next.js-16.4.6-blue.svg)](package.json)
 [![React](https://img.shields.io/badge/React-19.3.0-cyan.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue.svg)](tsconfig.json)
-[![Branch](https://img.shields.io/badge/Branch-feat%2Fmission--001--frontend-amber.svg)](https://github.com/Antrikshcodes/swarm-robotics-simulator/tree/feat/mission-001-frontend)
+[![Branch](https://img.shields.io/badge/Branch-main-amber.svg)](https://github.com/Antrikshcodes/swarm-robotics-simulator)
 [![Documentation](https://img.shields.io/badge/Docs-Complete%20Hub-purple.svg)](docs/README.md)
 
 SWARM is an autonomous multi-robot warehouse coordination and simulation platform. It models a configurable warehouse grid, assigns prioritized pickup and drop-off missions, plans trajectories across space and time, prevents robot conflicts before movement occurs, and recovers autonomously from deadlocks, hardware breakdowns, and dynamic aisle closures without resetting the simulation.
@@ -16,9 +16,8 @@ SWARM is an autonomous multi-robot warehouse coordination and simulation platfor
 ## Project Status
 
 - **Problem Benchmark:** NexHack 2.0 — Problem Statement 05
-- **Working Branch:** `feat/mission-001-frontend` (Missions 001–005 implemented; Mission 006 analytics and demo mode active)
 - **Repository:** [`Antrikshcodes/swarm-robotics-simulator`](https://github.com/Antrikshcodes/swarm-robotics-simulator)
-- **Automated Test Suite:** 15 test files / 196 tests passing (Vitest)
+- **Automated Test Suite:** 33 test files / 255 tests passing (Vitest) + Playwright Chromium E2E (`npm run e2e`)
 - **Execution Mode:** Deterministic, in-browser discrete-tick engine (Zero remote dependencies)
 
 ---
@@ -60,14 +59,15 @@ SWARM includes a comprehensive 32-document knowledge base and pitch strategy:
 
 | Area | Route | Implemented Functionality |
 |---|---|---|
-| **Overview** | `/` | Fleet & mission KPIs, live warehouse canvas preview, active alert stream, quick scenario launchers |
-| **Simulation Studio** | `/simulation` | Full HTML5 Canvas 2D arena (pan, zoom, fit, auto-follow); layer toggles (routes, reservations, wait graph); entity inspector; live fault injection (`fail_robot`, `restore_robot`, `close_aisle`, `reopen_aisle`, `add-mission`); seekable timeline |
+| **Landing Page** | `/` | Immersive Three.js 3D warehouse & autonomous robot showcase with WebGL fallback |
+| **Overview** | `/overview` | Fleet & mission KPIs, live warehouse canvas preview, active alert stream, quick scenario launchers |
+| **Simulation Studio** | `/simulation` | 2D HTML5 Canvas & 3D Three.js warehouse views (pan, zoom, fit, camera orbit); layer toggles (routes, reservations, wait graph); modular entity inspector; live fault injection (`fail_robot`, `restore_robot`, `close_aisle`, `reopen_aisle`, `add-mission`); seekable timeline |
 | **Demo Mode** | `/demo` | Curated launcher for six deterministic evaluation scenarios with live metrics, incident feed, and automated completion state |
 | **Fleet** | `/fleet` | Status-filtered roster (`idle`, `moving`, `carrying`, `waiting`, `failed`, `recovering`), battery telemetry, lifetime robot statistics |
-| **Missions** | `/missions` | Priority-badged mission board, state-filtered log with custody audit trails, ad-hoc mission dispatch modal |
+| **Missions** | `/missions` | Priority-badged mission board, state-filtered log with custody audit trails, ad-hoc mission dispatch |
 | **Incidents** | `/incidents` | Derived incident queue: deadlock cycles (`DL-nnnn`), machine failure records (`F-nn`), package rescue tasks (`RC-nn`), dynamic closures (`CL-nn`) |
-| **Analytics** | `/analytics` | Time-windowed delivery throughput, fleet time allocation, movement-density heatmaps, recovery counters, per-robot comparisons |
-| **Settings** | `/settings` | Configurable tick duration (50ms–1000ms), motion smoothing, visual layer preferences, keyboard shortcut reference |
+| **Analytics** | `/analytics` | Time-windowed delivery throughput, fleet time allocation, movement-density heatmaps, recovery counters, per-robot comparisons, **explainable per-robot timeline**, **cross-scenario run comparison**, and **JSON run-report export** |
+| **Settings** | `/settings` | Configurable tick duration (250ms–1000ms), motion smoothing, visual layer preferences, keyboard shortcut reference |
 
 ---
 
@@ -171,8 +171,11 @@ npm run typecheck
 # Run code linter
 npm run lint
 
-# Run automated Vitest test suite (15 files / 196 tests)
+# Run automated Vitest test suite (33 files / 255 tests)
 npm test
+
+# Run Playwright Chromium end-to-end suite (desktop + mobile)
+npm run e2e
 
 # Run multi-robot scaling benchmark (4–32 robots)
 npm run bench
