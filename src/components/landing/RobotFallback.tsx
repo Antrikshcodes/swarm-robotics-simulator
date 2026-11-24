@@ -17,7 +17,7 @@ export function RobotFallback() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="relative z-10 flex flex-col items-center rounded-2xl border border-white/10 bg-[#121A1E]/80 p-8 shadow-2xl backdrop-blur-md"
+        className="relative z-10 flex flex-col items-center rounded-lg border border-white/10 bg-[#0D1215] p-8"
       >
         {/* Robot Top LiDAR */}
         <div className="relative mb-2 flex flex-col items-center">

@@ -45,7 +45,7 @@ export function LandingNavigation({
       transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "bg-[#080B0D]/85 backdrop-blur-md border-b border-white/[0.08] py-3.5 shadow-lg shadow-black/40"
+          ? "bg-[#080B0D]/92 border-b border-white/[0.08] py-3.5"
           : "bg-transparent py-5"
       }`}
     >
@@ -118,7 +118,7 @@ export function LandingNavigation({
             type="button"
             disabled={isTransitioning}
             onClick={onEnterWarehouse}
-            className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/10 bg-[#192329] text-[#F2F4F3] font-mono text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:bg-[#121A1E] hover:border-[#40C8E8]/50 hover:shadow-lg hover:shadow-[#40C8E8]/10 active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="group relative inline-flex items-center gap-2 overflow-hidden rounded-md border border-[#40C8E8]/45 bg-[#40C8E8]/[0.06] px-4 py-2 font-mono text-[11px] font-semibold tracking-[0.14em] text-[#F2F4F3] uppercase transition-[border-color,background-color] duration-300 outline-none hover:border-[#40C8E8] hover:bg-[#40C8E8]/[0.12] focus-visible:ring-2 focus-visible:ring-[#40C8E8] disabled:opacity-50"
           >
             <span>ENTER WAREHOUSE</span>
             <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 text-[#40C8E8]" />
@@ -143,7 +143,7 @@ export function LandingNavigation({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-b border-white/10 bg-[#080B0D]/95 backdrop-blur-xl px-6 py-6"
+            className="md:hidden border-b border-white/10 bg-[#080B0D] px-6 py-6"
           >
             <div className="flex flex-col gap-4 font-mono text-xs tracking-wider">
               <button

@@ -1,168 +1,88 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, ShieldAlert } from "lucide-react";
+import { DataStrip, EASE_OUT, SceneSection, SectionHeader } from "./motion-primitives";
 
 const CONFLICT_STEPS = [
   {
     step: "01",
-    phase: "CONVERGING TRAJECTORIES",
-    detail: "SW-02 and SW-03 plan routes that overlap in a single-lane aisle at tick t=14.",
-    tag: "CONFLICT DETECTED",
-    tagColor: "#F5B942",
+    phase: "Converging trajectories",
+    detail: "SW-02 and SW-03 plan routes that meet in a single-lane aisle.",
+    tag: "Conflict detected",
+    color: "#F5B942",
   },
   {
     step: "02",
-    phase: "SPACETIME EVALUATION",
-    detail: "Coordinator calculates mission urgency, cargo status, and distance to nearest holding position.",
-    tag: "WAIT-FOR GRAPH ANALYSIS",
-    tagColor: "#40C8E8",
+    phase: "Space-time evaluation",
+    detail: "The coordinator weighs mission urgency, cargo and the nearest holding cell.",
+    tag: "Wait-for graph",
+    color: "#40C8E8",
   },
   {
     step: "03",
-    phase: "DETERMINISTIC YIELD",
-    detail: "SW-03 steps into safe holding cell off the route corridor, holding reservations until SW-02 clears.",
-    tag: "RIGHT-OF-WAY ASSIGNED",
-    tagColor: "#B7F34A",
+    phase: "Deterministic yield",
+    detail: "SW-03 steps into a holding cell off the corridor until SW-02 clears.",
+    tag: "Right-of-way",
+    color: "#B7F34A",
   },
   {
     step: "04",
-    phase: "SAFE TRAVERSAL",
-    detail: "Both robots continue to destination without cell collisions, head-on deadlocks, or manual intervention.",
-    tag: "ZERO INCIDENTS",
-    tagColor: "#40C8E8",
+    phase: "Safe traversal",
+    detail: "Both robots reach their destinations — no collision, no swap, no operator.",
+    tag: "Resolved",
+    color: "#40C8E8",
   },
-];
+] as const;
 
 export function CoordinationProblemSection() {
   return (
-    <section
-      id="coordination-conflict"
-      className="relative min-h-screen w-full flex flex-col justify-center py-24 px-6 md:px-12 lg:px-20 border-t border-white/[0.08] overflow-hidden"
-    >
-      <div className="max-w-7xl mx-auto w-full">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-          <div>
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-              className="flex items-center gap-2 mb-3"
-            >
-              <span className="font-mono text-[10px] tracking-[0.2em] text-[#89969C] uppercase">
-                SCENE 04 {"//"} THE COORDINATION PROBLEM
-              </span>
-            </motion.div>
+    <SceneSection id="coordination-conflict">
+      <SectionHeader index="04" label="The coordination problem" title={["Narrow-aisle", "conflict resolution."]} />
 
-            <motion.h2
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.7, delay: 0.1 }}
-              className="font-display text-4xl sm:text-6xl font-black tracking-[-0.03em] text-[#F2F4F3] leading-[0.96]"
-            >
-              NARROW-AISLE <br />
-              CONFLICT RESOLUTION.
-            </motion.h2>
-          </div>
-
-          {/* Incident Severity Status */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-[#F5B942]/30 bg-[#121A1E] backdrop-blur-md self-start md:self-auto"
+      {/* Minimal timeline: a rail that draws down with each phase. */}
+      <ol className="relative mb-10 ml-1.5 border-l border-white/[0.1]">
+        <motion.span
+          aria-hidden
+          className="absolute -left-px top-0 h-full w-px origin-top bg-gradient-to-b from-[#F5B942] via-[#40C8E8] to-[#B7F34A]"
+          initial={{ scaleY: 0 }}
+          whileInView={{ scaleY: 1 }}
+          viewport={{ once: true, margin: "-15% 0px" }}
+          transition={{ duration: 1.6, ease: EASE_OUT }}
+        />
+        {CONFLICT_STEPS.map((s, i) => (
+          <motion.li
+            key={s.step}
+            className="relative pb-6 pl-7 last:pb-0"
+            initial={{ opacity: 0, x: -8 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true, margin: "-10% 0px" }}
+            transition={{ duration: 0.6, delay: 0.2 + i * 0.25, ease: EASE_OUT }}
           >
-            <AlertTriangle className="size-4 text-[#F5B942] animate-pulse" />
-            <div className="font-mono text-xs text-[#89969C]">
-              <span className="text-[#F2F4F3] font-bold">CONFLICT SCENARIO:</span> ONE-CELL PASSAGE
+            <span aria-hidden className="absolute top-1.5 -left-[4.5px] size-2 rounded-full ring-4 ring-[#080B0D]" style={{ backgroundColor: s.color }} />
+            <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[10.5px] tracking-[0.16em] uppercase">
+              <span className="text-[#7E8C93]">Phase {s.step}</span>
+              <span style={{ color: s.color }}>{s.tag}</span>
             </div>
-          </motion.div>
-        </div>
+            <h3 className="mt-1 font-mono text-[12.5px] font-semibold tracking-[0.06em] text-[#F2F4F3] uppercase">{s.phase}</h3>
+            <p className="mt-1 max-w-[46ch] text-[13.5px] leading-relaxed text-[#9AA7AD]">{s.detail}</p>
+          </motion.li>
+        ))}
+      </ol>
 
-        {/* 4-Step Narrative Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {CONFLICT_STEPS.map((step, idx) => (
-            <motion.div
-              key={step.step}
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: idx * 0.1 }}
-              className="relative rounded-2xl border border-white/10 bg-[#121A1E]/70 p-5 backdrop-blur-md shadow-xl flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-mono text-xs font-bold text-[#89969C]">
-                    PHASE {step.step}
-                  </span>
-                  <span
-                    className="text-[9px] font-mono px-2 py-0.5 rounded-full border border-white/10 bg-white/5 font-semibold"
-                    style={{ color: step.tagColor }}
-                  >
-                    {step.tag}
-                  </span>
-                </div>
-
-                <h3 className="font-mono text-sm font-bold text-[#F2F4F3] mb-2">
-                  {step.phase}
-                </h3>
-
-                <p className="text-xs text-[#89969C] leading-relaxed">
-                  {step.detail}
-                </p>
-              </div>
-
-              {idx < 3 && (
-                <div className="hidden lg:flex items-center gap-1 text-[10px] font-mono text-[#89969C] pt-3 mt-3 border-t border-white/5">
-                  <span>TRANSITION</span>
-                  <ArrowRight className="size-3 text-[#40C8E8]" />
-                </div>
-              )}
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Live Narrow-Aisle Conflict Telemetry Strip */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.7, delay: 0.4 }}
-          className="rounded-2xl border border-white/10 bg-[#0D1215]/80 p-5 md:p-6 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-6"
-        >
-          {/* Robot A Telemetry */}
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="size-10 rounded-xl bg-[#40C8E8]/10 border border-[#40C8E8]/40 flex items-center justify-center font-mono font-bold text-[#40C8E8] text-xs">
-              SW-02
-            </div>
-            <div className="font-mono text-xs">
-              <div className="text-[#F2F4F3] font-bold">PRIORITY: HIGH (CARGO LOADED)</div>
-              <div className="text-[#89969C]">HOLDING RIGHT-OF-WAY · AISLE PASSAGE COMMITTED</div>
-            </div>
-          </div>
-
-          {/* Central Conflict Mediator */}
-          <div className="hidden lg:flex items-center gap-3 font-mono text-xs text-[#89969C] px-4 py-2 rounded-xl bg-[#121A1E] border border-white/10">
-            <ShieldAlert className="size-4 text-[#F5B942]" />
-            <span>ARBITRATION: YIELD DETOUR APPLIED (SAFETY MARGIN: 1 CELL)</span>
-          </div>
-
-          {/* Robot B Telemetry */}
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="size-10 rounded-xl bg-[#F5B942]/10 border border-[#F5B942]/40 flex items-center justify-center font-mono font-bold text-[#F5B942] text-xs">
-              SW-03
-            </div>
-            <div className="font-mono text-xs">
-              <div className="text-[#F2F4F3] font-bold">STATE: YIELDING IN HOLDING CELL</div>
-              <div className="text-[#89969C]">RESUMING PASSAGE IN +2 TICKS</div>
-            </div>
-          </div>
-        </motion.div>
+      <div className="space-y-2">
+        <DataStrip
+          cells={[
+            { label: "SW-02", value: "Priority high · cargo", dot: "#40C8E8" },
+            { value: "Right-of-way", tone: "#40C8E8" },
+          ]}
+        />
+        <DataStrip
+          cells={[
+            { label: "SW-03", value: "Yielding · holding cell", dot: "#F5B942" },
+            { value: "Resumes +2 ticks", tone: "#B7F34A" },
+          ]}
+        />
       </div>
-    </section>
+    </SceneSection>
   );
 }
