@@ -37,7 +37,14 @@ flowchart TD
 - **Interactive HTML5 2D Canvas:** Direct visual warehouse rendering with pan, zoom (0.5x to 3.0x), and auto-follow camera tracking.
 - **Layer Visual Toggles:** Toggle display of coordinate coordinates, planned routes, space-time reservation footprints, and the active wait-for dependency graph.
 - **Playback Control Strip:** Play, pause, single-tick advance, playback speed multiplier (0.5x, 1x, 2x, 5x), and time-travel scrubber.
-- **Entity Inspector:** Click any robot, station, or package to inspect its internal state, battery charge, custody history, active plan steps, and blocked ticks.
+- **3D Warehouse (default) and 2D grid:** two views of the same engine snapshot, with camera presets (isometric, overview, top, follow, chase) that frame any layout size. Preset changes glide in an arc and are instant with reduced motion.
+- **Interactive warehouse inspection (Mission 007):** click any warehouse element in 3D or 2D. Hover outlines what is under the pointer; the selected element gets a lime highlight. Escape, the inspector's ✕, or clicking empty space clears the selection. The selection is shared between 2D and 3D.
+  - **Robots:** identity, status, battery, heading, position, mission, destination and route, current activity, and failure/recovery details. Camera actions: **Focus**, **Follow**, **Overview**.
+  - **Rack blocks:** coordinates, footprint and size, the open aisles on each face (lane or narrow, closures, robots, stations), routes running alongside, and robots nearby. Inventory and storage levels are shown as *not modelled*, because the engine does not model them.
+  - **Aisle cells:** coordinates, cell type, traversability, narrow aisle, closure, occupant, future reservations, end-of-plan holds, robots waiting on the cell, deadlocks, planned routes through it, and robots within three cells. Close a cell or an aisle run, or reopen it.
+  - **Stations (pickup, drop-off, charger):** ID, type, cell, the robot at the station (charging state and battery for chargers), inbound robots, waiting packages, and open missions with package, robot and state. Pickups can queue a new mission.
+  - **Obstacles:** block footprint and adjacent aisles.
+  - **Frame in view** on any non-robot entity glides the 3D camera to it, or centres the 2D view.
 - **Interactive Fault Injection Controls:**
   - `Close Aisle`: Select any aisle cell or run of cells to close dynamically.
   - `Fail Robot`: Select any active robot and inject one of five hardware failure types (`motor`, `battery`, `navigation`, `communication`, `emergency-stop`).

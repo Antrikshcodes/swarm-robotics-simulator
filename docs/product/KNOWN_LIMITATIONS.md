@@ -43,3 +43,15 @@
 2. **Simplified Battery Model:** Battery depletion is a linear demonstration model (0.04% per move, 0.01% per handling tick, 0.004% per idle tick; +1% per tick on charger). It does not reflect battery chemistry, voltage sag under heavy load, or temperature variations.
 3. **Desktop-First Optimization:** While the application shell features responsive mobile layouts (`/` and `/simulation`), the primary industrial control room experience is optimized for desktop and tablet displays ($\ge 1280 \times 800$ resolution).
 4. **Empirical Performance Scope:** Benchmark metrics (sub-1.2 ms tick duration at 32 robots) were measured on a single test machine (Apple M5, Node 24) on a synthetic $40 \times 27$ grid. Ultra-large facilities (e.g., $200 \times 200$ grids with 100+ robots) have not been profiled.
+
+---
+
+## 5. 3D Inspection & Rendering Boundaries (Mission 007)
+
+1. **No rack inventory model.** Racks are blocked cells in the engine. Storage levels, bin occupancy and inventory are not modelled, so the inspector says so. The racking levels and totes drawn in 3D are decorative. Rack "IDs" are derived from block corner cells.
+2. **Pointer-only 3D picking.** Entities in the 3D canvas are picked with a mouse or touch. Keyboard users can select robots from the inspector's fleet list and robot links, and can clear any selection with Escape, but cannot move between racks or cells in the 3D canvas with the keyboard.
+3. **Small targets at overview distance.** On the largest layouts, one-cell aisles are only a few pixels wide in the overview, so a click may land on the neighbouring rack. Zoom in, or use **Frame in view**, for precise aisle picks.
+4. **Measured on one machine.** The 3D benchmarks in [PERFORMANCE_3D.md](../technical/PERFORMANCE_3D.md) come from one Apple M5 machine in headless Chrome. FPS there is vsync-capped at 60. GPU execution time was not measured, and integrated or older GPUs have not been profiled. Layouts above 40 × 27 and fleets above 32 robots have not been profiled in 3D.
+5. **Stress-test scenarios are synthetic.** "Stress test · 15/32 robots" are generated layouts for measuring scale. They do not model a real site.
+6. **Ambient occlusion not added.** Screen-space AO and post-processing were deliberately left out: on weaker GPUs the cost would outweigh the gain in readability.
+

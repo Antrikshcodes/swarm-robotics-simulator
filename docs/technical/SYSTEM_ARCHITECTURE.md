@@ -80,6 +80,8 @@ The presentation layer is implemented with Next.js 16 App Router and React 19:
 - **Unidirectional Dispatch:** User interactions (starting simulation, adding missions, closing aisles, injecting robot failures) dispatch typed `EngineCommand` objects to the store.
 - **Decoupled Pacing:** `PlaybackDriver` (`src/components/layout/playback-driver.tsx`) manages wall-clock timing using `requestAnimationFrame`. The engine itself has zero awareness of browser timers, allowing instant headless execution and seeking.
 - **Canvas Rendering Engine:** `warehouse-renderer.ts` is a pure function that paints directly to an HTML5 Canvas context based on `(snapshot, viewport, options)`. Canvas rendering never mutates engine state or computes robot paths.
+- **3D Simulation Studio (default view):** React Three Fiber renders the same snapshot as a 3D warehouse. Static geometry is derived from the layout; robots are interpolated per frame outside React. Like the canvas, it never mutates engine state.
+- **Shared inspection layer (Mission 007):** both views write one UI-only `selection` (robot, station, rack block, obstacle, or cell) and resolve it through the pure `src/lib/inspection.ts`. Selecting is read-only with respect to the engine; the only engine call is the existing `select-robot` existence check. See [FRONTEND_ARCHITECTURE.md §5](FRONTEND_ARCHITECTURE.md) and [PERFORMANCE_3D.md](PERFORMANCE_3D.md).
 
 ---
 

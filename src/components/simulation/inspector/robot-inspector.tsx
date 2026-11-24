@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUp, ChevronDown, Crosshair, HandHelping, Package, PowerOff, RotateCcw } from "lucide-react";
+import { ArrowUp, ChevronDown, HandHelping, Package, PowerOff, RotateCcw } from "lucide-react";
 import type { FailureType, RobotState, SimulationSnapshot } from "@/types/simulation";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +15,6 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { RobotChip } from "@/components/fleet/robot-chip";
 import { BatteryMeter } from "@/components/fleet/battery-meter";
 import { useSimulationStore } from "@/store/simulation-store";
-import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
 import {
   DEADLOCK_STATUS,
@@ -33,6 +32,7 @@ import {
 } from "@/lib/status";
 import { findStation, robotUtilisation } from "@/lib/selectors";
 import { cn } from "@/lib/utils";
+import { RobotCameraActions } from "./entity-inspectors";
 import { Dash, Row, Section } from "./inspector-primitives";
 
 const ROUTE_EVENT: Record<NonNullable<RobotState["routeEvent"]>["kind"], { label: string; tone: Tone }> = {
@@ -55,7 +55,6 @@ export function RobotInspector({ robot, snapshot }: { robot: RobotState; snapsho
   const status = ROBOT_STATUS[robot.status];
   const mission = robot.missionId ? snapshot.missions.find((m) => m.id === robot.missionId) : undefined;
   const destination = robot.destinationStationId ? findStation(snapshot, robot.destinationStationId) : undefined;
-  const centerOn = useViewportStore((s) => s.centerOn);
   const dispatch = useSimulationStore((s) => s.dispatch);
   const pkg = robot.packageId ?? mission?.packageId;
   const custody = pkg ? snapshot.packages.find((p) => p.id === pkg) : undefined;
@@ -89,10 +88,9 @@ export function RobotInspector({ robot, snapshot }: { robot: RobotState; snapsho
           </p>
         ) : null}
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" className="border-line" onClick={() => centerOn(robot.position.x, robot.position.y)}>
-            <Crosshair />
-            Centre view
-          </Button>
+          <RobotCameraActions robotId={robot.id} position={robot.position} />
+        </div>
+        <div className="mt-2 grid grid-cols-1 gap-2">
           {failed ? (
             <Button size="sm" onClick={() => dispatch({ type: "restore_robot", robotId: robot.id })}>
               <RotateCcw />

@@ -49,7 +49,7 @@ export interface ScheduledCommand {
 export interface ScenarioDefinition {
   readonly id: string;
   /** Selector grouping: operational scenarios, the deadlock lab or the recovery lab. */
-  readonly group?: "operations" | "lab" | "recovery";
+  readonly group?: "operations" | "lab" | "recovery" | "stress";
   readonly name: string;
   readonly summary: string;
   readonly focus: string;

@@ -90,3 +90,69 @@ Timing is managed by `PlaybackDriver` (`src/components/layout/playback-driver.ts
 - Uses `requestAnimationFrame` to maintain smooth 60 FPS visual interpolation.
 - Calculates elapsed time and calls `step()` when the user-selected tick interval (e.g., 200 ms) elapses.
 - **Decoupling Guarantee:** If the browser tab loses focus or frame rate drops, the engine remains 100% deterministic; simulation time never slips or speeds up unpredictably.
+
+---
+
+## 5. 3D Simulation Studio: Inspection & Selection (Mission 007)
+
+The 3D view (`src/components/simulation/scene3d/`) and the 2D canvas are two views of one engine snapshot. They also share one **selection model**, held in `simulation-store` as `selection: EntitySelection | null`.
+
+### Selection model
+
+`EntitySelection` (`src/types/simulation.ts`) is one of:
+
+- `robot` (id)
+- `station` (id)
+- `rack` (x, y)
+- `obstacle` (x, y)
+- `cell` (x, y)
+
+Racks and obstacles are addressed by the picked cell; the inspector resolves the whole connected block. Selection is **UI state only**:
+
+- `select()` never mutates the engine.
+- The only engine call is the existing read-only `select-robot` existence check.
+- `src/store/selection.test.ts` asserts that the snapshot object, tick, playback status and timeline extent are unchanged after selecting every kind.
+
+| Concern | Module |
+|---|---|
+| Cell → selection (station, rack, obstacle, or cell), shared by 2D hit-testing and 3D picking | `selectionForCell()` in `src/lib/inspection.ts` |
+| Entity data for the inspector (pure, unit-tested) | `inspectRobot`, `inspectStation`, `inspectBlock`, `inspectCell`, `resolveSelection` in `src/lib/inspection.ts` |
+| 3D picking | `BlockPickers` (one invisible instanced box per rack / obstacle cell), the floor plane (open cells, stations), and one invisible hit box per robot |
+| Hover (no React renders per pointer move) | `scene3d/hover-store.ts`, read imperatively by `HoverHighlight`, the cursor and the hover readout |
+| Selected highlight | `SelectionHighlight`: lime box edges for rack blocks and obstacles, floor brackets for cells and stations, plus a footprint fill. Robots keep their lime ring. In 2D, `drawBrackets` around the same cells |
+| Inspector panel | `components/simulation/inspector.tsx`, which resolves the selection once and renders `RobotInspector`, `StationInspector`, `BlockInspector` or `CellInspector`, with an enter-only transition (reduced motion respected through `MotionConfig`) |
+| Camera actions | `cameraActions` in `scene3d/camera-store.ts`: `focusRobot`, `followRobot`, `returnToOverview`, `focusRegion` |
+
+### Interactions
+
+- **Click to select.** Overlapping objects resolve to the nearest hit: a robot in front of a rack wins; a rack hides the floor behind it.
+- **Click empty space** (outside the warehouse slab) or press **Escape** to clear.
+- **Double-click a robot** to follow it.
+- **Inspector robot links** are buttons, so robots can also be selected with the keyboard.
+- **Scenario switch** clears the selection. Switching between 2D and 3D keeps it.
+
+### Data honesty
+
+The engine models racks as blocked cells. It has no inventory, storage levels or bin occupancy, so the rack inspector says "not modelled", and the 3D levels and totes are described there as decorative. Rack "IDs" are derived from the block's corner cells (for example `P5–T6`), because the engine has none.
+
+### Camera
+
+`src/lib/scene3d/camera-fit.ts` holds the pure camera maths:
+
+- **Fixed presets** (isometric, overview, top) solve the camera distance in closed form, so that every corner of the warehouse volume fits the frustum at the current aspect.
+- The orbit target is then re-centred on the projected extents.
+- The volume height is the actual racking height, so cut-away labs frame tighter.
+- **Transitions** ease (cubic) over 850 ms. The target moves linearly while the camera's offset interpolates in spherical coordinates, so it arcs rather than cutting through racking. With reduced motion, transitions are instant.
+- **Region focus** frames a rack block, station or cell from the current direction.
+- Follow and chase are unchanged.
+
+### Rendering costs
+
+See [PERFORMANCE_3D.md](PERFORMANCE_3D.md) for the measured results and the harness (`npm run perf:3d`). In summary:
+
+- The shared robot model merges same-material parts and has a distance LOD.
+- Stations and closures are instanced.
+- Picking uses proxy volumes, not the visible meshes.
+- Adaptive DPR never exceeds the display's pixel ratio.
+- Frames are rendered on demand only, as before.
+
