@@ -2,6 +2,18 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-25 — Mission 006 quality, analytics comparison, and E2E verification
+
+### Added
+- Explainable per-robot timeline (`src/lib/robot-timeline.ts` and `src/components/analytics/robot-timeline-panel.tsx`) surfacing mission, coordination, deadlock, recovery, and fault traces per robot.
+- Cross-scenario in-memory run archiving (`src/store/run-archive.ts` and `src/components/analytics/run-archive-panel.tsx`) automatically saving summaries on reset or scenario switch, plus JSON run-report export (`src/lib/snapshot-export.ts`).
+- Expanded Vitest coverage from 15 files / 196 tests to 29 files / 243 tests (world layout, robot lifecycle, all 14 deterministic scenarios, format/status helpers, selectors, robot timeline, run archive, snapshot export, and Zustand stores).
+- Playwright browser E2E suite (`tests/e2e/swarm.e2e.mjs`, `npm run e2e`) covering all 9 desktop and 9 mobile routes plus interactive Studio, Fleet, Missions, Incidents, Analytics, Settings, and Demo Mode workflows.
+
+### Changed
+- Split the 840-line Studio inspector (`src/components/simulation/inspector.tsx`) into focused modules under `src/components/simulation/inspector/`.
+- Clamped `throughputBuckets` index calculation at tick `0`, set `turbopack.root` in `next.config.ts`, added `@` alias resolution in `vitest.config.ts`, and updated `LandingPage` scroll detection to use viewport bounding rects.
+
 ## 2026-11-24 — Mission 006 analytics and Demo Mode
 
 ### Added

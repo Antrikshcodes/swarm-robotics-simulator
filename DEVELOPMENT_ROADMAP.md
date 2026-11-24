@@ -83,17 +83,17 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 - [x] Tests: every failure type, movement/assignment prevention, mission and custody preservation, atomic transfer, duplicate-custody prevention, selection, timeout, rescuer failure, closure, reopening, occupied cell, invalidation, reservation release, replanning, deadlock integration, determinism, 3 000-tick stress run.
 - [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 006 — Metrics, polish, and judging scenarios (in progress)
+## Mission 006 — Metrics, polish, and judging scenarios
 
 - [x] Completed jobs, waiting time and utilisation from engine state/events *(Missions 002–003)*; [x] movement-density heatmap from retained movement records.
 - [x] One-click demonstrations for normal operations, narrow-aisle conflict, deadlock, carrying failure, aisle closure, and high-density stress.
 - [x] Judge-facing Demo Mode with playback, reset, speed, live metrics, event timeline, and completion state.
 - [x] Analytics time-window, robot, and mission-status filters; fleet and per-robot views.
-- [x] Event log and coordination decision trace *(Missions 002–003)*; [ ] explainable per-robot timeline.
-- [ ] End-to-end UI tests and larger-map performance checks.
+- [x] Event log and coordination decision trace *(Missions 002–003)*; [x] explainable per-robot timeline (`src/lib/robot-timeline.ts`).
+- [x] Cross-scenario in-memory run archiving (`src/store/run-archive.ts`), JSON run-report export, and full browser Playwright E2E + responsive checks (`npm run e2e`).
 - [x] Concise judge demonstration flow documented in README.
 
-Analytics limitation: scenario scope is the currently loaded run. The app does not archive snapshots for cross-scenario comparison. Movement and event visualizations respect their bounded log horizons; cumulative counters remain all-run values.
+Analytics note: run archiving and comparison persist in memory for the current browser session (reset/scenario switches archive up to 20 runs). Movement and event visualizations respect their bounded engine log horizons; cumulative counters remain all-run values.
 
 ## Delivery rule
 

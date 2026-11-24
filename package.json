@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run test",
     "test": "vitest run",
-    "bench": "SWARM_BENCH=1 vitest run --silent=false"
+    "bench": "SWARM_BENCH=1 vitest run --silent=false",
+    "e2e": "node tests/e2e/swarm.e2e.mjs"
   },
   "dependencies": {
     "@types/three": "^0.187.0",
@@ -34,6 +35,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "playwright": "^1.65.1",
     "tailwindcss": "4.3.3",
     "typescript": "^5",
     "vitest": "^5.1.1"

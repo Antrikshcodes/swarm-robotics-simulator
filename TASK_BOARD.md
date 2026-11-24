@@ -157,24 +157,23 @@ Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPME
 
 ## Current milestone: Mission 006 — Analytics and hackathon readiness
 
-Branch: `feat/mission-001-frontend`. Mission 006 is in **Review**; cross-scenario analytics, complete E2E coverage, and responsive viewport verification remain open.
+Branch: `feat/mission-006-quality`. Added cross-scenario run archive, explainable per-robot timeline, JSON run-report export, Studio inspector modularization, expanded Vitest suites, and full Playwright browser E2E verification.
 
 | ID | Task | Status | Owner |
 |---|---|---|---|
 | M6-01 | Audit branch, history, docs, Mission 001–005 source and baseline tests | Done | Codex |
-| M6-02 | Analytics time, robot, and mission-state filters with fleet/per-robot summaries | Review | Codex |
-| M6-03 | Throughput, movement-density view, recovery counts, and operations timeline | Review | Codex |
-| M6-04 | Judge Demo Mode for six existing deterministic engine scenarios | Review | Codex |
-| M6-05 | Documentation updates and demo instructions | Review | Codex |
+| M6-02 | Analytics time, robot, and mission-state filters with fleet/per-robot summaries | Done | Codex |
+| M6-03 | Throughput, movement-density view, recovery counts, and operations timeline | Done | Codex |
+| M6-04 | Judge Demo Mode for six existing deterministic engine scenarios | Done | Codex |
+| M6-05 | Documentation updates and demo instructions | Done | Codex |
 | M6-06 | Unit/integration checks, typecheck, lint, build, and 4–32 robot benchmark | Done | Codex |
-| M6-07 | Cross-scenario archived analytics and scenario filter | Todo | Future |
-| M6-08 | Full browser E2E coverage and responsive viewport verification | Todo | Future |
+| M6-07 | Cross-scenario archived analytics, explainable robot timeline, and JSON export | Done | Pavitr Makhija |
+| M6-08 | Full browser E2E coverage and responsive viewport verification | Done | Pavitr Makhija |
 
-### M6-06 verification record
+### M6-08 verification record
 
-- `npm test` — 196 tests pass across 15 files.
+- `npm test` — 243 tests pass across 29 files (engine, coordination, deadlock, recovery, scenarios, selectors, analytics, timeline, store, and snapshot export).
 - `npm run lint` — passes with no warnings.
-- `npm run typecheck` — passes.
-- `npm run build -- --webpack` — passes; eight routes prerendered. The default Turbopack build hit a sandbox process/port permission error.
-- `npm run bench` — 4–32 robots, 600 ticks, 0 commit-time collision rejections; mean tick time 0.17–1.22 ms on this machine.
-- Browser inspection confirmed `/demo` and `/analytics` render and expose their controls. Responsive breakpoint testing and all existing route interactions remain unverified.
+- `npm run typecheck` — passes (strict).
+- `npm run build` — passes with Turbopack; all 12 routes prerendered cleanly.
+- `npm run e2e` — Playwright Chromium verification passes across all 9 desktop (`1440×900`) and 9 mobile (`390×844`) routes with zero horizontal overflow, zero console/page errors, and interactive flows across Studio, Fleet, Missions, Incidents, Analytics, Settings, and Demo Mode.
