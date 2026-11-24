@@ -327,6 +327,24 @@ describe("narrow aisle", () => {
   });
 });
 
+describe("liveness in shipped scenarios (bounded-wait replanning, not a general guarantee)", () => {
+  it.each(SCENARIOS.map((s) => s.id))("%s keeps delivering and never blocks a working robot for long", (id) => {
+    const e = engine(id);
+    let maxBlocked = 0;
+    let lastDelivered = 0;
+    for (let window = 0; window < 4; window += 1) {
+      let snap = e.getSnapshot();
+      for (let i = 0; i < 500; i += 1) {
+        snap = e.step();
+        for (const r of snap.robots) if (r.status !== "failed") maxBlocked = Math.max(maxBlocked, r.blockedTicks);
+      }
+      expect(snap.metrics.completedDeliveries, `no deliveries in window ${window}`).toBeGreaterThan(lastDelivered);
+      lastDelivered = snap.metrics.completedDeliveries;
+    }
+    expect(maxBlocked).toBeLessThan(40);
+  });
+});
+
 describe("pathological inputs", () => {
   it("compiled scenarios are cached and shared safely", () => {
     expect(getCompiledScenario("standard")).toBe(getCompiledScenario("standard"));

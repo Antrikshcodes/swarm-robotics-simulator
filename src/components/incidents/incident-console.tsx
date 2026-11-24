@@ -32,7 +32,7 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
     icon: Hourglass,
     mission: "Missions 004–005",
     planned:
-      "Today robots wait behind occupied cells and replan around other robots after a bounded, rank-staggered wait. Time-indexed reservations will prevent most of these conflicts, and the deadlock manager will tell congestion apart from true deadlock.",
+      "Today robots wait behind occupied cells and replan around other robots after a bounded wait; in head-on blocks the empty or higher-ID robot yields and steps aside if it has no other route. Time-indexed reservations will prevent most of these conflicts, and the deadlock manager will tell congestion apart from true deadlock.",
   },
   "low-battery": {
     label: "Low battery",

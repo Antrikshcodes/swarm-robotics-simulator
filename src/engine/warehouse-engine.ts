@@ -40,7 +40,7 @@ import { findPath, type PathResult } from "./pathfinding/astar";
 import { validateRobotTransition } from "./robots/robot-lifecycle";
 import type { CompiledScenario, MissionSpec, RobotSpec } from "./scenario";
 import { getCompiledScenario, SCENARIOS } from "./scenarios";
-import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, pointKey, samePoint, stationAt } from "./world/layout";
+import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, neighbours, pointKey, samePoint, stationAt } from "./world/layout";
 
 /**
  * The simulation source the UI talks to. Implemented by WarehouseEngine;
@@ -449,7 +449,7 @@ export class WarehouseEngine implements SimulationSource {
     const next = robot.path[0];
     const holder = occupancy.get(pointKey(next));
     if (holder && holder !== robot.spec.id) {
-      this.blocked(robot, target, next, holder);
+      this.blocked(robot, target, next, holder, occupancy);
       return;
     }
 
@@ -636,7 +636,7 @@ export class WarehouseEngine implements SimulationSource {
     }
   }
 
-  private blocked(robot: RobotRuntime, target: Target, next: GridPoint, holder: string): void {
+  private blocked(robot: RobotRuntime, target: Target, next: GridPoint, holder: string, occupancy: Map<string, string>): void {
     robot.blockedTicks += 1;
     robot.stats.waitingTicks += 1;
     robot.battery = clampBattery(robot.battery - DRAIN_IDLE);
@@ -659,10 +659,38 @@ export class WarehouseEngine implements SimulationSource {
       : REPLAN_AFTER + robot.rank;
     if (robot.blockedTicks % threshold !== 0) return;
     const plan = this.plan(robot, target.cell, true);
-    if (!plan.ok || plan.path.length === 0 || samePoint(plan.path[0], next)) return;
+    if (!plan.ok || plan.path.length === 0 || samePoint(plan.path[0], next)) {
+      // No alternative route (e.g. the goal is the other robot's cell): a
+      // yielding robot steps aside into a free neighbour to break the block.
+      if (mutual && other && this.shouldYield(robot, other)) this.stepAside(robot, other, holder, occupancy);
+      return;
+    }
     robot.path = [...plan.path];
     robot.stats.replans += 1;
     this.emit("robot-replanned", "info", `${robot.spec.id} replanned around ${holder} after ${robot.blockedTicks} ticks (${plan.cost} cells)`, {
+      robotId: robot.spec.id,
+      missionId: robot.missionId ?? undefined,
+    });
+  }
+
+  private stepAside(robot: RobotRuntime, other: RobotRuntime, holder: string, occupancy: Map<string, string>): void {
+    const layout = this.scenario.layout;
+    const avoid = new Set(other.path.slice(0, 2).map(pointKey));
+    const spot = neighbours(robot.position).find((p) => {
+      if (!inBounds(layout, p)) return false;
+      const kind = cellKindAt(layout, p)!;
+      const key = pointKey(p);
+      return isTraversableKind(kind) && !isStationKind(kind) && !this.closedCells.has(key) && !occupancy.has(key) && !avoid.has(key);
+    });
+    if (!spot) return;
+    occupancy.delete(pointKey(robot.position));
+    occupancy.set(pointKey(spot), robot.spec.id);
+    robot.path = [spot];
+    this.moveTo(robot, spot);
+    robot.path = [];
+    robot.stats.replans += 1;
+    robot.note = `Stepped aside for ${holder}`;
+    this.emit("robot-replanned", "info", `${robot.spec.id} stepped aside to (${spot.x}, ${spot.y}) to let ${holder} pass`, {
       robotId: robot.spec.id,
       missionId: robot.missionId ?? undefined,
     });
