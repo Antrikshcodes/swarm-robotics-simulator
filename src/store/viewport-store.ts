@@ -30,6 +30,8 @@ interface ViewportState {
   zoomBy: (factor: number, ax?: number, ay?: number) => void;
   fitToView: () => void;
   resetZoom: () => void;
+  /** Pan so the centre of cell (x, y) sits in the middle of the viewport. */
+  centerOn: (x: number, y: number) => void;
 }
 
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
@@ -78,6 +80,15 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   },
 
   resetZoom: () => centre(set, get(), 1),
+
+  centerOn: (x, y) => {
+    const s = get();
+    const cell = BASE_CELL_PX * s.scale;
+    set({
+      offsetX: Math.round(s.viewportWidth / 2 - (x + 0.5) * cell),
+      offsetY: Math.round(s.viewportHeight / 2 - (y + 0.5) * cell),
+    });
+  },
 }));
 
 function centre(
