@@ -2,18 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { addAfterEffect, addEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, PerformanceMonitor } from "@react-three/drei";
-import type { GridPoint, SimulationSnapshot } from "@/types/simulation";
-import { cellKindAt, stationAt } from "@/engine";
+import type { EntitySelection, GridPoint, SimulationSnapshot } from "@/types/simulation";
+import { cellKindAt } from "@/engine";
 import { cellRef } from "@/lib/format";
+import { connectedBlock, selectionForCell } from "@/lib/inspection";
+import { RACK, rackHeight } from "@/lib/scene3d/layout-to-scene";
 import { readCanvasTheme } from "@/lib/render/canvas-theme";
 import { frameOf, worldExtent } from "@/lib/scene3d/grid-to-world";
 import { tickProgress } from "@/lib/scene3d/interpolation";
 import { usePreferences } from "@/store/preferences-store";
 import { useSimulationStore } from "@/store/simulation-store";
 import { presetPose, CameraRig } from "./camera-rig";
-import { selectionSource, useCamera3D } from "./camera-store";
+import { useCamera3D } from "./camera-store";
+import { useHover3D } from "./hover-store";
+import { BlockPickers, HoverHighlight, SelectionHighlight, selectCell } from "./inspection-layer";
 import { Closures, Incidents, Reservations, Routes, Stations } from "./overlays";
 import { RobotFleet } from "./robot-fleet";
 import { SceneLabels } from "./scene-labels";
@@ -58,7 +62,9 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const statsRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const [quality] = useState<Quality>(detectQuality);
-  const [dpr, setDpr] = useState(() => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, MAX_DPR[quality]));
+  // Never render above the display's own pixel ratio (the adaptive monitor may only lower it).
+  const [maxDpr] = useState(() => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, MAX_DPR[quality]));
+  const [dpr, setDpr] = useState(maxDpr);
   const layout = useSimulationStore((s) => s.snapshot.layout);
   const frame = useMemo(() => frameOf(layout), [layout]);
   const palette = useMemo(() => (typeof document === "undefined" ? ["#40c8e8"] : readCanvasTheme(document.documentElement).robots), []);
@@ -66,6 +72,8 @@ export default function Warehouse3D({ className }: { className?: string }) {
   // Small lab layouts are mostly one-cell corridors between racking: show them cut away.
   const cutawayPref = usePreferences((s) => s.rackCutaway);
   const cutaway = cutawayPref || isCorridorLayout(layout);
+  const rackH = rackHeight(cutaway ? 1 : RACK.levels.length);
+  const hasObstacles = useMemo(() => layout.cells.includes("obstacle"), [layout]);
 
   // On a new layout, return to the default view — unless a robot is being
   // followed / chased (e.g. "Focus in 3D Studio" from the Fleet page) and still exists.
@@ -77,34 +85,31 @@ export default function Warehouse3D({ className }: { className?: string }) {
     else useCamera3D.getState().setPreset("isometric", null);
   }, [layout]);
 
-  const onHoverCell = (cell: GridPoint | null) => {
-    const out = readoutRef.current;
-    if (!out) return;
-    const snapshot = useSimulationStore.getState().snapshot;
-    const kind = cell ? cellKindAt(snapshot.layout, cell) : null;
-    if (!cell || !kind) {
-      out.dataset.empty = "";
-      out.textContent = "";
-      return;
-    }
-    delete out.dataset.empty;
-    const station = stationAt(snapshot.layout, cell);
-    const robot = snapshot.robots.find((r) => r.position.x === cell.x && r.position.y === cell.y);
-    out.textContent = [`${cellRef(cell)}  (${cell.x}, ${cell.y})`, station ? station.id : KIND_LABEL[kind], robot?.id].filter(Boolean).join("  ·  ");
-  };
+  // Hover readout and cursor follow the hover store imperatively (no React render per pointer move).
+  useEffect(() => {
+    const apply = () => {
+      const out = readoutRef.current;
+      const { target } = useHover3D.getState();
+      if (containerRef.current) containerRef.current.style.cursor = target ? "pointer" : "";
+      if (!out) return;
+      const text = target ? describeHover(useSimulationStore.getState().snapshot, target) : "";
+      if (text) delete out.dataset.empty;
+      else out.dataset.empty = "";
+      out.textContent = text;
+    };
+    return useHover3D.subscribe(apply);
+  }, []);
+  // Leaving the view clears hover.
+  useEffect(() => () => useHover3D.getState().setTarget(null), []);
 
-  const onSelectCell = (cell: GridPoint) => {
-    const snapshot = useSimulationStore.getState().snapshot;
-    const station = stationAt(snapshot.layout, cell);
-    selectionSource.fromCanvas = true;
-    useSimulationStore.getState().select(station ? { kind: "station", id: station.id } : { kind: "cell", x: cell.x, y: cell.y });
-  };
+  const onHoverCell = (cell: GridPoint | null) => useHover3D.getState().setTarget(cell ? selectionForCell(layout, cell) : null);
+  const onSelectCell = (cell: GridPoint) => selectCell(layout, cell);
 
   const { halfX, halfZ } = worldExtent(frame);
   const span = Math.hypot(halfX, halfZ);
 
   return (
-    <div ref={containerRef} className={className ? `relative ${className}` : "relative"} role="application" aria-label="3D warehouse. Drag to orbit, right-drag to pan, scroll to zoom. Click a robot to select it, double-click to follow it.">
+    <div ref={containerRef} className={className ? `relative ${className}` : "relative"} role="application" aria-label="3D warehouse. Drag to orbit, right-drag to pan, scroll to zoom. Click a robot, rack, station or aisle cell to inspect it, double-click a robot to follow it, Escape clears the selection.">
       <Canvas
         frameloop="demand"
         dpr={dpr}
@@ -116,18 +121,24 @@ export default function Warehouse3D({ className }: { className?: string }) {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.05;
         }}
-        onPointerMissed={() => useSimulationStore.getState().select(null)}
+        onPointerMissed={() => {
+          useSimulationStore.getState().select(null);
+          useHover3D.getState().setTarget(null);
+        }}
       >
         <color attach="background" args={["#0b1013"]} />
         <fog attach="fog" args={["#0b1013", span * 2.2, span * 5]} />
         <PerformanceMonitor
           onDecline={() => setDpr((d) => Math.max(1, d - 0.25))}
-          onIncline={() => setDpr((d) => Math.min(MAX_DPR[quality], d + 0.25))}
+          onIncline={() => setDpr((d) => Math.min(maxDpr, d + 0.25))}
         />
         <Lighting frame={frame} quality={quality} />
         <WarehouseFloor layout={layout} showGrid={usePreferencesValue("showGrid")} onSelectCell={onSelectCell} onHoverCell={onHoverCell} />
         <WarehouseRacks layout={layout} quality={quality} cutaway={cutaway} />
+        <BlockPickers layout={layout} rackHeight={rackH} />
         <Stations stations={layout.stations} frame={frame} />
+        <SelectionHighlight layout={layout} rackHeight={rackH} />
+        <HoverHighlight layout={layout} rackHeight={rackH} />
         <LiveLayers palette={palette} />
         <OrbitControls
           makeDefault
@@ -139,11 +150,11 @@ export default function Warehouse3D({ className }: { className?: string }) {
           screenSpacePanning={false}
           mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
         />
-        <CameraRig frame={frame} />
+        <CameraRig frame={frame} sceneHeight={Math.max(rackH, hasObstacles ? 2.6 : 0)} />
         <FrameDriver statsRef={statsRef} />
         <SceneLabels layer={labelLayerRef} />
       </Canvas>
-      <div ref={labelLayerRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" />
+      <div ref={labelLayerRef} aria-hidden data-perf="3d-labels" className="pointer-events-none absolute inset-0 overflow-hidden" />
 
       <div
         ref={readoutRef}
@@ -151,9 +162,32 @@ export default function Warehouse3D({ className }: { className?: string }) {
         aria-live="off"
         className="pointer-events-none absolute right-3 bottom-3 rounded-sm border border-line bg-background/85 px-2 py-1 font-mono text-[11px] whitespace-pre text-text-secondary data-[empty]:hidden"
       />
-      <div ref={statsRef} aria-hidden className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] tracking-wide text-text-dim" />
+      <div ref={statsRef} aria-hidden data-quality={quality} data-perf="3d-stats" className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] tracking-wide text-text-dim" />
     </div>
   );
+}
+
+/** One-line readout for whatever the pointer is over. */
+function describeHover(snapshot: SimulationSnapshot, target: EntitySelection): string {
+  if (target.kind === "robot") {
+    const r = snapshot.robots.find((x) => x.id === target.id);
+    return r ? `${r.id}  ·  ${r.status}  ·  ${cellRef(r.position)}` : "";
+  }
+  if (target.kind === "station") {
+    const s = snapshot.layout.stations.find((x) => x.id === target.id);
+    return s ? `${s.id}  ·  ${KIND_LABEL[s.kind]}  ·  ${cellRef(s.position)}` : "";
+  }
+  const cell = { x: target.x, y: target.y };
+  const kind = cellKindAt(snapshot.layout, cell);
+  if (!kind) return "";
+  if (target.kind === "rack" || target.kind === "obstacle") {
+    const b = connectedBlock(snapshot.layout, cell, target.kind).bounds;
+    const name = target.kind === "rack" ? "Rack block" : "Obstacle";
+    return `${name} ${cellRef({ x: b.x0, y: b.y0 })}–${cellRef({ x: b.x1, y: b.y1 })}  ·  bay ${cellRef(cell)}`;
+  }
+  const robot = snapshot.robots.find((r) => r.position.x === cell.x && r.position.y === cell.y);
+  const closed = snapshot.closures.some((c) => c.cells.some((p) => p.x === cell.x && p.y === cell.y));
+  return [`${cellRef(cell)}  (${cell.x}, ${cell.y})`, KIND_LABEL[kind], closed ? "closed" : null, robot?.id].filter(Boolean).join("  ·  ");
 }
 
 /** Subscribe to one preference (keeps the Canvas root from re-rendering on unrelated changes). */
@@ -218,9 +252,21 @@ function FrameDriver({ statsRef }: { statsRef: React.RefObject<HTMLDivElement | 
   const invalidate = useThree((s) => s.invalidate);
   const gl = useThree((s) => s.gl);
   const stats = useRef({ frames: 0, since: 0, worst: 0, last: 0 });
+  // Main-thread cost of each rendered frame (useFrame callbacks + scene submission), in ms.
+  const cost = useRef({ start: 0, samples: [] as number[] });
 
   useEffect(() => {
     const unsubs = [useSimulationStore.subscribe(() => invalidate()), usePreferences.subscribe(() => invalidate()), useCamera3D.subscribe(() => invalidate())];
+    const c = cost.current;
+    unsubs.push(
+      addEffect(() => {
+        c.start = performance.now();
+      }),
+      addAfterEffect(() => {
+        if (c.start) c.samples.push(performance.now() - c.start);
+        c.start = 0;
+      }),
+    );
     return () => unsubs.forEach((u) => u());
   }, [invalidate]);
 
@@ -242,7 +288,21 @@ function FrameDriver({ statsRef }: { statsRef: React.RefObject<HTMLDivElement | 
     s.last = now;
     if (now - s.since >= 1000 && statsRef.current) {
       const fps = (s.frames * 1000) / (now - s.since);
-      statsRef.current.textContent = `${fps.toFixed(0)} FPS · worst ${s.worst.toFixed(0)} ms · ${gl.info.render.calls} draw calls · ${gl.getPixelRatio().toFixed(2)}× DPR`;
+      const el = statsRef.current;
+      const { render, memory, programs } = gl.info;
+      el.textContent = `${fps.toFixed(0)} FPS · worst ${s.worst.toFixed(0)} ms · ${render.calls} draw calls · ${gl.getPixelRatio().toFixed(2)}× DPR`;
+      // Renderer counters for the performance harness (tests/perf); read-only diagnostics.
+      el.dataset.calls = String(render.calls);
+      el.dataset.triangles = String(render.triangles);
+      el.dataset.geometries = String(memory.geometries);
+      el.dataset.textures = String(memory.textures);
+      el.dataset.programs = String(programs?.length ?? 0);
+      const samples = cost.current.samples.sort((a, b) => a - b);
+      if (samples.length) {
+        el.dataset.cpuMean = (samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(3);
+        el.dataset.cpuP95 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))].toFixed(3);
+      }
+      cost.current.samples = [];
       s.frames = 0;
       s.since = now;
       s.worst = 0;

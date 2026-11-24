@@ -1,0 +1,183 @@
+{
+  "label": "before",
+  "date": "2026-11-24T20:14:05.824Z",
+  "env": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5, Unspecified Version)",
+    "cores": 10,
+    "devicePixelRatio": 1,
+    "viewport": "1440×900",
+    "platform": "darwin 27.2.0 arm64",
+    "cpu": "Apple M5",
+    "headless": true,
+    "sampleMs": 5000
+  },
+  "cases": {
+    "small": {
+      "label": "Small · Standard warehouse (5 robots)",
+      "frames": 300,
+      "fps": 60,
+      "meanMs": 16.67,
+      "p95Ms": 16.8,
+      "maxMs": 16.8,
+      "frameCpuMeanMs": 1.92,
+      "frameCpuP95Ms": 3.8,
+      "quality": "high",
+      "cpuMeanMs": 1.743,
+      "cpuP95Ms": 2.6,
+      "calls": 180,
+      "triangles": 79844,
+      "geometries": 55,
+      "textures": 4,
+      "programs": 16,
+      "readout": "60 FPS · worst 18 ms · 180 draw calls · 1.50× DPR",
+      "heapMB": 18.1
+    },
+    "medium": {
+      "label": "Medium · Stress test 32×21 (15 robots)",
+      "frames": 300,
+      "fps": 60,
+      "meanMs": 16.67,
+      "p95Ms": 16.8,
+      "maxMs": 16.8,
+      "frameCpuMeanMs": 2.49,
+      "frameCpuP95Ms": 3.5,
+      "quality": "high",
+      "cpuMeanMs": 2.593,
+      "cpuP95Ms": 5.2,
+      "calls": 425,
+      "triangles": 125346,
+      "geometries": 57,
+      "textures": 4,
+      "programs": 16,
+      "readout": "60 FPS · worst 17 ms · 425 draw calls · 1.75× DPR",
+      "heapMB": 20.3
+    },
+    "large": {
+      "label": "Large · Stress test 40×27 (32 robots)",
+      "frames": 300,
+      "fps": 60,
+      "meanMs": 16.67,
+      "p95Ms": 16.7,
+      "maxMs": 16.8,
+      "frameCpuMeanMs": 2.94,
+      "frameCpuP95Ms": 5.4,
+      "quality": "high",
+      "cpuMeanMs": 3.082,
+      "cpuP95Ms": 4.4,
+      "calls": 712,
+      "triangles": 215608,
+      "geometries": 58,
+      "textures": 4,
+      "programs": 16,
+      "readout": "60 FPS · worst 17 ms · 712 draw calls · 1.75× DPR",
+      "heapMB": 23.3
+    },
+    "dense": {
+      "label": "High density · narrow aisles, heavy feed (8 robots)",
+      "frames": 300,
+      "fps": 60,
+      "meanMs": 16.67,
+      "p95Ms": 16.8,
+      "maxMs": 16.8,
+      "frameCpuMeanMs": 2.31,
+      "frameCpuP95Ms": 5.1,
+      "quality": "high",
+      "cpuMeanMs": 2.268,
+      "cpuP95Ms": 3,
+      "calls": 267,
+      "triangles": 63430,
+      "geometries": 63,
+      "textures": 4,
+      "programs": 16,
+      "readout": "60 FPS · worst 17 ms · 267 draw calls · 1.75× DPR",
+      "heapMB": 20.6
+    }
+  },
+  "stress": {
+    "initialLoad": {
+      "firstFrameMs": 480,
+      "note": "navigation start → first rendered 3D frame (labels placed), cold page, production build"
+    },
+    "selectionTargets": [
+      "R-13",
+      "R-17",
+      "R-21"
+    ],
+    "selection": {
+      "scenario": "Large · Stress test 40×27 (32 robots)",
+      "attempts": 6,
+      "hits": 6,
+      "meanMs": 5.1,
+      "p95Ms": 5.9,
+      "maxMs": 5.9,
+      "followWhileRunning": {
+        "frames": 181,
+        "fps": 60,
+        "meanMs": 16.67,
+        "p95Ms": 16.7,
+        "maxMs": 16.8
+      },
+      "note": "pointerdown on a robot in the 3D view → robot inspector rendered (MutationObserver)"
+    },
+    "viewSwitching": {
+      "cycles": 10,
+      "to3dMeanMs": 157.2,
+      "to3dMaxMs": 168,
+      "before": {
+        "quality": "high",
+        "cpuMeanMs": 2.247,
+        "cpuP95Ms": 2.9,
+        "calls": 180,
+        "triangles": 79714,
+        "geometries": 55,
+        "textures": 4,
+        "programs": 15,
+        "readout": "60 FPS · worst 18 ms · 180 draw calls · 1.75× DPR",
+        "heapMB": 20.9
+      },
+      "after": {
+        "quality": "high",
+        "cpuMeanMs": 2.303,
+        "cpuP95Ms": 5,
+        "calls": 182,
+        "triangles": 79824,
+        "geometries": 55,
+        "textures": 4,
+        "programs": 16,
+        "readout": "60 FPS · worst 18 ms · 182 draw calls · 1.00× DPR",
+        "heapMB": 22.4
+      },
+      "note": "2D → 3D click until first 3D frame; resources read while running, before and after 10 cycles"
+    },
+    "scenarioLoads": {
+      "loads": 12,
+      "before": {
+        "quality": "high",
+        "cpuMeanMs": 2.185,
+        "cpuP95Ms": 2.8,
+        "calls": 180,
+        "triangles": 79844,
+        "geometries": 55,
+        "textures": 4,
+        "programs": 15,
+        "readout": "60 FPS · worst 18 ms · 180 draw calls · 1.25× DPR",
+        "heapMB": 22.6
+      },
+      "after": {
+        "quality": "high",
+        "cpuMeanMs": 2.42,
+        "cpuP95Ms": 2.9,
+        "calls": 180,
+        "triangles": 79738,
+        "geometries": 57,
+        "textures": 4,
+        "programs": 15,
+        "readout": "60 FPS · worst 18 ms · 180 draw calls · 1.75× DPR",
+        "heapMB": 23.5
+      },
+      "note": "Standard scenario measured before and after 3 cycles of medium → dense → large → small"
+    }
+  },
+  "pageErrors": []
+}

@@ -124,6 +124,31 @@ async function runSuite() {
     await dPage.getByRole("application", { name: /3D warehouse/i }).waitFor();
     console.log("✓ Simulation Studio 3D/2D views, step, scenario switch & deadlock detection verified");
 
+    // ------------------------------------------------------------------ 2b. 3D warehouse inspection (Mission 007)
+    await dPage.getByLabel("Scenario").first().click();
+    await dPage.getByRole("option", { name: /^Standard warehouse/ }).click();
+    await dPage.getByRole("listbox").waitFor({ state: "detached" });
+    const scene = dPage.getByRole("application", { name: /3D warehouse/i });
+    await dPage.waitForFunction(() => document.querySelector('[data-perf="3d-labels"]')?.children.length > 0);
+    await dPage.waitForTimeout(1200); // camera settles on the fitted preset
+    const box = await scene.boundingBox();
+    const inspector = dPage.locator('aside[aria-label="Inspector"]');
+    // Click the middle of the warehouse: a rack block or an aisle cell, never page chrome.
+    await dPage.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await inspector.getByText(/· (Rack block|Aisle cell|Narrow aisle|Obstacle|Robot|.* station)/).waitFor();
+    const picked = (await inspector.locator(".font-mono.text-sm").first().textContent())?.trim();
+    assert.ok(picked, "3D click selected an entity");
+    // Selection is shared with the 2D view and survives the switch.
+    await dPage.getByRole("radio", { name: /2d view/i }).click();
+    await inspector.getByText(picked, { exact: true }).first().waitFor();
+    await dPage.getByRole("radio", { name: /3d view/i }).click();
+    await scene.waitFor();
+    // Escape clears the selection; the fleet overview returns.
+    await dPage.keyboard.press("Escape");
+    await inspector.getByText(/^Fleet · /).waitFor();
+    assert.equal(await inspector.getByRole("button", { name: /Clear selection/i }).count(), 0, "selection cleared by Escape");
+    console.log(`✓ 3D inspection: picked "${picked}", synchronised with 2D, cleared with Escape`);
+
     // ------------------------------------------------------------------ 3. Robot Fault Injection, Restore & Incidents
     await dPage.locator('nav a[href="/fleet"]').click();
     await dPage.getByRole("button", { name: /inspect/i }).first().click();

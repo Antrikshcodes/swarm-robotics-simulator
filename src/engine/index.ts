@@ -7,7 +7,7 @@ export { computeMetrics, LOW_BATTERY_THRESHOLD, BLOCKED_ALERT_TICKS } from "./me
 export { checkInvariants } from "./invariants";
 export { findPath } from "./pathfinding/astar";
 export { isActiveMission } from "./missions/mission-lifecycle";
-export { SCENARIOS, DEFAULT_SCENARIO_ID, getScenario, getCompiledScenario } from "./scenarios";
+export { SCENARIOS, STRESS_SCENARIOS, DEFAULT_SCENARIO_ID, getScenario, getCompiledScenario, hasScenario } from "./scenarios";
 export { cellKindAt, isTraversable, stationAt, samePoint, pointKey } from "./world/layout";
 
 import { WarehouseEngine, type EngineOptions } from "./warehouse-engine";

@@ -6,7 +6,10 @@ import type { ThreeEvent } from "@react-three/fiber";
 import type { CellKind, GridPoint, WarehouseLayout } from "@/types/simulation";
 import { CELL, frameOf, worldToGrid } from "@/lib/scene3d/grid-to-world";
 
-const PX = 48; // texture pixels per grid cell
+/** Texture pixels per grid cell; reduced for very large layouts so the texture stays ≤ 4096 px. */
+const MAX_PX = 48;
+const MAX_TEXTURE = 4096;
+export const floorTexelsPerCell = (width: number, height: number) => Math.max(12, Math.min(MAX_PX, Math.floor(MAX_TEXTURE / Math.max(width, height))));
 
 /**
  * Industrial concrete floor painted from the engine layout: lane safety
@@ -15,6 +18,8 @@ const PX = 48; // texture pixels per grid cell
  */
 function paintFloor(layout: WarehouseLayout, showGrid: boolean): HTMLCanvasElement {
   const { width, height } = layout;
+  const PX = floorTexelsPerCell(width, height);
+  const sc = PX / MAX_PX; // scale for line widths and insets
   const canvas = document.createElement("canvas");
   canvas.width = width * PX;
   canvas.height = height * PX;
@@ -26,11 +31,30 @@ function paintFloor(layout: WarehouseLayout, showGrid: boolean): HTMLCanvasEleme
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   let seed = 7;
   const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < width * height * 40; i += 1) {
+  for (let i = 0; i < width * height * 40 * sc * sc; i += 1) {
     const v = rand();
     ctx.fillStyle = v > 0.5 ? `rgba(255,255,255,${0.02 + rand() * 0.03})` : `rgba(0,0,0,${0.04 + rand() * 0.05})`;
     ctx.fillRect(rand() * canvas.width, rand() * canvas.height, 1 + rand() * 2, 1 + rand() * 2);
   }
+  // Broad tonal variation between pours, and saw-cut control joints every four cells.
+  for (let py = 0; py < height; py += 4) {
+    for (let px = 0; px < width; px += 4) {
+      ctx.fillStyle = rand() > 0.5 ? `rgba(255,255,255,${0.012 + rand() * 0.018})` : `rgba(0,0,0,${0.02 + rand() * 0.03})`;
+      ctx.fillRect(px * PX, py * PX, 4 * PX, 4 * PX);
+    }
+  }
+  ctx.strokeStyle = "rgba(8,11,13,0.35)";
+  ctx.lineWidth = Math.max(1, 1.5 * sc);
+  ctx.beginPath();
+  for (let x = 4; x < width; x += 4) {
+    ctx.moveTo(x * PX, 0);
+    ctx.lineTo(x * PX, canvas.height);
+  }
+  for (let y = 4; y < height; y += 4) {
+    ctx.moveTo(0, y * PX);
+    ctx.lineTo(canvas.width, y * PX);
+  }
+  ctx.stroke();
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -51,8 +75,8 @@ function paintFloor(layout: WarehouseLayout, showGrid: boolean): HTMLCanvasEleme
         ctx.fillStyle = "rgba(245,185,66,0.08)";
         ctx.fillRect(px, py, PX, PX);
         ctx.strokeStyle = "rgba(245,185,66,0.28)";
-        ctx.lineWidth = 3;
-        for (let d = -PX; d < PX * 2; d += 12) {
+        ctx.lineWidth = 3 * sc;
+        for (let d = -PX; d < PX * 2; d += 12 * sc) {
           ctx.beginPath();
           ctx.moveTo(px + d, py + PX);
           ctx.lineTo(px + d + PX, py);
@@ -65,14 +89,14 @@ function paintFloor(layout: WarehouseLayout, showGrid: boolean): HTMLCanvasEleme
 
   // Yellow safety lines along every edge between an open cell and racking.
   ctx.strokeStyle = "rgba(232,196,92,0.55)";
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 * sc;
   const solid = (k: CellKind | null) => k === "rack" || k === "obstacle";
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (solid(kind(x, y))) continue;
       const px = x * PX;
       const py = y * PX;
-      const inset = 4;
+      const inset = 4 * sc;
       ctx.beginPath();
       if (solid(kind(x, y - 1))) {
         ctx.moveTo(px, py + inset);
@@ -100,19 +124,20 @@ function paintFloor(layout: WarehouseLayout, showGrid: boolean): HTMLCanvasEleme
     const py = s.position.y * PX;
     const color = s.kind === "pickup" ? "64,200,232" : s.kind === "dropoff" ? "183,243,74" : "200,210,216";
     ctx.fillStyle = `rgba(${color},0.16)`;
-    ctx.fillRect(px + 4, py + 4, PX - 8, PX - 8);
+    const k = sc;
+    ctx.fillRect(px + 4 * k, py + 4 * k, PX - 8 * k, PX - 8 * k);
     ctx.strokeStyle = `rgba(${color},0.85)`;
-    ctx.lineWidth = 2.5;
-    ctx.strokeRect(px + 5, py + 5, PX - 10, PX - 10);
+    ctx.lineWidth = 2.5 * k;
+    ctx.strokeRect(px + 5 * k, py + 5 * k, PX - 10 * k, PX - 10 * k);
     // Corner ticks
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 4 * k;
     for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const ox = px + 5 + cx * (PX - 10);
-      const oy = py + 5 + cy * (PX - 10);
+      const ox = px + 5 * k + cx * (PX - 10 * k);
+      const oy = py + 5 * k + cy * (PX - 10 * k);
       ctx.beginPath();
-      ctx.moveTo(ox + (cx ? -10 : 10), oy);
+      ctx.moveTo(ox + (cx ? -10 : 10) * k, oy);
       ctx.lineTo(ox, oy);
-      ctx.lineTo(ox, oy + (cy ? -10 : 10));
+      ctx.lineTo(ox, oy + (cy ? -10 : 10) * k);
       ctx.stroke();
     }
   }

@@ -51,7 +51,7 @@ import { DeadlockManager, type DeadlockOptions } from "./deadlock/deadlock-manag
 import type { PlanningGrid } from "./coordination/space-time-planner";
 import { validateRobotTransition } from "./robots/robot-lifecycle";
 import type { CompiledScenario, MissionSpec, RobotSpec } from "./scenario";
-import { getCompiledScenario, SCENARIOS } from "./scenarios";
+import { getCompiledScenario, hasScenario } from "./scenarios";
 import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, manhattan, samePoint, stationAt } from "./world/layout";
 
 /**
@@ -290,7 +290,7 @@ export class WarehouseEngine implements SimulationSource {
         this.reset();
         return ok({ message: "Reset to tick 0" });
       case "load-scenario": {
-        if (!SCENARIOS.some((s) => s.id === command.scenarioId)) {
+        if (!hasScenario(command.scenarioId)) {
           return err("unknown-scenario", `Unknown scenario "${command.scenarioId}"`);
         }
         this.scenario = getCompiledScenario(command.scenarioId);

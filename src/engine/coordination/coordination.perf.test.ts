@@ -1,5 +1,6 @@
 import { it } from "vitest";
-import { compileScenario, type MissionSpec, type ScenarioDefinition } from "../scenario";
+import { compileScenario, type ScenarioDefinition } from "../scenario";
+import { stressScenario } from "../scenarios/stress";
 import { WarehouseEngine } from "../warehouse-engine";
 
 /**
@@ -10,47 +11,8 @@ import { WarehouseEngine } from "../warehouse-engine";
 const W = 40;
 const H = 27;
 
-function buildMap(): string[] {
-  const rows: string[] = [];
-  for (let y = 0; y < H; y += 1) {
-    let row = "";
-    for (let x = 0; x < W; x += 1) {
-      const aisle = y % 3 === 0 && y < H - 3;
-      const dockRow = aisle && y % 6 === 3;
-      if (y >= H - 3) row += ".";
-      else if (x === 0) row += dockRow ? "P" : ".";
-      else if (x === W - 1) row += dockRow ? "D" : ".";
-      else if (aisle || x === 1 || x === W - 2 || x % 8 === 4) row += "-";
-      else row += "#";
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
 function scenario(robots: number): ScenarioDefinition {
-  const pickups = ["PK-01", "PK-02", "PK-03", "PK-04"];
-  const dropoffs = ["DO-01", "DO-02", "DO-03", "DO-04"];
-  const routes: MissionSpec[] = pickups.flatMap((pickup) => dropoffs.map((dropoff) => ({ pickup, dropoff })));
-  return {
-    id: `bench-${robots}`,
-    name: `Bench ${robots}`,
-    summary: "",
-    focus: "",
-    seed: 42,
-    map: buildMap(),
-    robots: Array.from({ length: robots }, (_, i) => ({
-      id: `R-${String(i + 1).padStart(2, "0")}`,
-      model: "B",
-      colorIndex: (i % 8) + 1,
-      heading: "N" as const,
-      battery: 100,
-      home: { x: 2 + (i % 36), y: H - 1 - Math.floor(i / 36) },
-    })),
-    missions: [],
-    feed: { intervalTicks: 2, maxOpen: robots, routes, priorityMix: { high: 0.2, urgent: 0.05 } },
-    handling: { loadTicks: 3, unloadTicks: 3 },
-  };
+  return stressScenario({ id: `bench-${robots}`, name: `Bench ${robots}`, width: W, height: H, robots });
 }
 
 it("coordination scaling", () => {

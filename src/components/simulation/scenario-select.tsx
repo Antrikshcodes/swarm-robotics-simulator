@@ -1,7 +1,7 @@
 "use client";
 
 import { Map as MapIcon } from "lucide-react";
-import { SCENARIOS } from "@/engine";
+import { SCENARIOS, STRESS_SCENARIOS } from "@/engine";
 import { useSimulationStore } from "@/store/simulation-store";
 import {
   Select,
@@ -19,7 +19,10 @@ const GROUPS = [
   { id: "operations", label: "Operations" },
   { id: "lab", label: "Deadlock lab" },
   { id: "recovery", label: "Recovery lab" },
+  { id: "stress", label: "Stress test (synthetic)" },
 ] as const;
+
+const LISTED = [...SCENARIOS, ...STRESS_SCENARIOS];
 
 export function ScenarioSelect({ className, compact = false }: { className?: string; compact?: boolean }) {
   const scenarioId = useSimulationStore((s) => s.scenarioId);
@@ -44,7 +47,7 @@ export function ScenarioSelect({ className, compact = false }: { className?: str
           <SelectGroup key={group.id}>
             {index > 0 ? <SelectSeparator /> : null}
             <SelectLabel className="text-[10.5px] tracking-wide uppercase">{group.label}</SelectLabel>
-            {SCENARIOS.filter((s) => (s.group ?? "operations") === group.id).map((scenario) => (
+            {LISTED.filter((s) => (s.group ?? "operations") === group.id).map((scenario) => (
               <SelectItem key={scenario.id} value={scenario.id} className="py-2">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[13px]">{scenario.name}</span>

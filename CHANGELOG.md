@@ -2,6 +2,67 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-25 — Mission 007: interactive warehouse inspection, 3D polish and performance
+
+### Added
+- **Warehouse inspection in the 3D and 2D Studio.**
+  - Click any robot, rack block, obstacle, pickup, drop-off or charging station, or aisle cell.
+  - Hover outline and lime selection highlight in 3D; matching brackets in 2D.
+  - Escape, ✕ or clicking empty space clears the selection.
+  - Selection is shared and kept when switching between 2D and 3D.
+- `EntitySelection` gains `rack` and `obstacle` kinds.
+- `src/lib/inspection.ts`: pure inspection projections, used by both views and the inspector.
+  - Cell → entity mapping.
+  - Connected rack and obstacle blocks with adjacent aisle faces.
+  - Cell occupancy, reservations, holds, wait-for edges, deadlocks, planned routes and nearby robots.
+  - Station missions, inbound robots and waiting packages.
+  - Robot route and wait relations.
+- **Inspector panel.**
+  - New rack/obstacle inspector, with storage reported as *not modelled*.
+  - Extended aisle-cell and station inspectors.
+  - Selected-kind label in the header and enter transition.
+  - Keyboard-reachable robot links.
+- **Camera.**
+  - Robot camera actions: Focus, Follow, Overview.
+  - **Frame in view** for racks, stations and cells (3D) or centre (2D).
+- **Stress-test scenarios.** "Stress test · 15 robots" (32 × 21) and "· 32 robots" (40 × 27) are synthetic and kept out of the 14 shipped scenarios. The engine benchmark uses the same generator.
+- **3D performance harness.** `tests/perf/studio-3d.perf.mjs` (`npm run perf:3d`) measures:
+  - frame cadence and main-thread frame cost
+  - draw calls, triangles and live resources
+  - heap
+  - first-frame time and selection latency
+  - 2D/3D switching and scenario-load resource growth
+- Results and methodology are in `docs/technical/PERFORMANCE_3D.md`.
+- **Tests.** 27 new unit tests (317 in total): inspection, selection state and read-only guarantee, 2D/3D selection sync, camera actions, camera framing at many layout sizes and aspects, and stress scenarios. The E2E suite gains a 3D inspection step.
+
+### Changed
+- **Robot model** (shared with the Fleet portraits):
+  - status beacon, spoked hubs, LiDAR emitter window, tote with lid
+  - idle robots dimmed; waiting, failed and restoring robots pulse while running (off with reduced motion)
+  - selected ring takes priority
+- **Routes.** Selecting a robot mutes other routes and shows a destination pin. Wait-for links get arrowheads.
+- **Stations.** Pylons with a light bar in the station's colour; charging docks with contacts.
+- **Closures.** Striped barricades.
+- **Floor.** Concrete pour variation and saw-cut joints.
+- **Camera presets** fit the actual warehouse volume, recentred, at any layout size and aspect. Transitions ease along an arc. Small cut-away labs frame tighter.
+
+### Performance (measured; see `docs/technical/PERFORMANCE_3D.md`)
+- **Draw calls about halved.** 180 → 88 (5 robots), 425 → 205 (15), 712 → 368 (32), 267 → 129 (high density). Live geometries 55–63 → 32–36.
+- **How:**
+  - merged same-material robot parts
+  - distance LOD for robots
+  - instanced stations and closures
+  - proxy pick volumes: one hit box per robot instead of about 22 raycast meshes
+  - adaptive DPR capped at the display's pixel ratio (it could previously exceed it)
+  - floor texture limited to 4096 px
+  - robot ring materials disposed on unmount
+- **Unchanged:** selection response (5.1 → 4.4 ms), first 3D frame (480 → 469 ms), FPS (vsync-capped at 60). No resource growth across 10 view switches or 12 scenario loads.
+
+### Limits
+- No rack inventory model: storage is reported as not modelled.
+- 3D picking is pointer-only.
+- Benchmarks come from one Apple M5 machine with headless Chrome; GPU time was not measured.
+
 ## 2026-11-25 — Mission 006 quality, analytics comparison, and E2E verification
 
 ### Added

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createSimulationSource, getCompiledScenario, SCENARIOS } from "../../engine";
-import { angleDelta, CELL, gridToWorld, HEADING_YAW, worldToGrid } from "./grid-to-world";
+import * as THREE from "three";
+import { CAMERA_FOV, easeInOutCubic, interpolatePose, presetPose, regionPose, SCENE_HEIGHT } from "./camera-fit";
+import { angleDelta, CELL, gridToWorld, HEADING_YAW, worldExtent, worldToGrid } from "./grid-to-world";
 import { easeInOut, lerpGrid, tickProgress } from "./interpolation";
 import { buildRackScene, isOpenCell, RACK } from "./layout-to-scene";
 
@@ -106,5 +108,63 @@ describe("layout → 3D scene", () => {
         }
       }
     }
+  });
+});
+
+describe("camera framing", () => {
+  const project = (pose: { position: THREE.Vector3; target: THREE.Vector3 }, aspect: number, p: THREE.Vector3) => {
+    const cam = new THREE.PerspectiveCamera(CAMERA_FOV, aspect, 0.1, 1000);
+    cam.position.copy(pose.position);
+    cam.lookAt(pose.target);
+    cam.updateMatrixWorld();
+    return p.clone().project(cam);
+  };
+
+  it.each([
+    [26, 16, 1.6],
+    [40, 27, 1.6],
+    [40, 27, 0.8],
+    [12, 8, 2.4],
+    [60, 18, 1.2],
+  ])("fits a %i × %i warehouse at aspect %f in every fixed preset", (width, height, aspect) => {
+    const frame = { width, height };
+    const { halfX, halfZ } = worldExtent(frame);
+    for (const preset of ["isometric", "overview", "top"] as const) {
+      const pose = presetPose(preset, frame, aspect);
+      const h = preset === "top" ? 0 : SCENE_HEIGHT;
+      for (const x of [-halfX, halfX]) for (const y of [0, h]) for (const z of [-halfZ, halfZ]) {
+        const ndc = project(pose, aspect, new THREE.Vector3(x, y, z));
+        expect(Math.abs(ndc.x)).toBeLessThanOrEqual(1.0001);
+        expect(Math.abs(ndc.y)).toBeLessThanOrEqual(1.0001);
+        expect(ndc.z).toBeLessThan(1);
+      }
+    }
+  });
+
+  it("frames a region from the current direction, never closer than the minimum", () => {
+    const pose = regionPose({ width: 26, height: 16 }, { x0: 2, y0: 1, x1: 11, y1: 1 }, new THREE.Vector3(0.5, 0.7, 0.6), 1.6);
+    expect(pose.position.distanceTo(pose.target)).toBeGreaterThanOrEqual(4.5);
+    const tiny = regionPose({ width: 26, height: 16 }, { x0: 5, y0: 5, x1: 5, y1: 5 }, new THREE.Vector3(1, 0.05, 0), 1.6);
+    const d = tiny.position.distanceTo(tiny.target);
+    expect(d).toBeGreaterThanOrEqual(4.5);
+    expect(d).toBeLessThan(15);
+    // Elevation is clamped so the camera never skims the floor.
+    expect(tiny.position.y - tiny.target.y).toBeGreaterThan(2);
+  });
+
+  it("transitions arc around the target and land exactly on the goal", () => {
+    const from = presetPose("isometric", { width: 26, height: 16 });
+    const to = presetPose("top", { width: 26, height: 16 });
+    const out = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+    interpolatePose(from, to, 0, out);
+    expect(out.position.distanceTo(from.position)).toBeLessThan(1e-6);
+    interpolatePose(from, to, 1, out);
+    expect(out.position.distanceTo(to.position)).toBeLessThan(1e-4);
+    // Midway the camera stays well above the floor (no straight cut through racking).
+    interpolatePose(from, to, 0.5, out);
+    expect(out.position.y).toBeGreaterThan(SCENE_HEIGHT * 2);
+    expect(easeInOutCubic(0)).toBe(0);
+    expect(easeInOutCubic(1)).toBe(1);
+    expect(easeInOutCubic(0.5)).toBeCloseTo(0.5);
   });
 });

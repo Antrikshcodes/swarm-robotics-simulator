@@ -7,6 +7,7 @@ import type {
   SimulationSnapshot,
 } from "@/types/simulation";
 import { columnLabel } from "@/lib/format";
+import { selectionCells, selectionForCell } from "@/lib/inspection";
 import { robotColor, withAlpha, type CanvasTheme } from "./canvas-theme";
 
 /**
@@ -84,9 +85,7 @@ export function hitTest(
   const cell = screenToCell(view, sx, sy);
   const { layout } = snapshot;
   if (cell.x < 0 || cell.y < 0 || cell.x >= layout.width || cell.y >= layout.height) return null;
-  const station = layout.stations.find((s) => s.position.x === cell.x && s.position.y === cell.y);
-  if (station) return { kind: "station", id: station.id };
-  return { kind: "cell", x: cell.x, y: cell.y };
+  return selectionForCell(layout, cell);
 }
 
 export function drawWarehouse(
@@ -145,14 +144,21 @@ export function drawWarehouse(
     }
   }
 
-  // Selected station / cell highlight
+  // Selected station / cell / rack block / obstacle highlight (same resolution as the 3D view)
   const sel = options.selection;
   if (sel && sel.kind !== "robot") {
-    const point =
-      sel.kind === "cell"
-        ? { x: sel.x, y: sel.y }
-        : layout.stations.find((s) => s.id === sel.id)?.position;
-    if (point) drawBrackets(ctx, theme.lime, ox + point.x * cell, oy + point.y * cell, cell);
+    const cells = selectionCells(snapshot, sel);
+    if (cells.length > 1) {
+      ctx.fillStyle = withAlpha(theme.lime, 0.12);
+      for (const c of cells) ctx.fillRect(ox + c.x * cell, oy + c.y * cell, cell, cell);
+    }
+    if (cells.length) {
+      const x0 = Math.min(...cells.map((c) => c.x));
+      const y0 = Math.min(...cells.map((c) => c.y));
+      const x1 = Math.max(...cells.map((c) => c.x));
+      const y1 = Math.max(...cells.map((c) => c.y));
+      drawBrackets(ctx, theme.lime, ox + x0 * cell, oy + y0 * cell, (x1 - x0 + 1) * cell, (y1 - y0 + 1) * cell);
+    }
   }
 
   const selectedRobot = sel?.kind === "robot" ? sel.id : null;
@@ -331,9 +337,11 @@ function drawGrid(
   }
 }
 
-function drawBrackets(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, size: number) {
-  const len = Math.max(4, size * 0.28);
+function drawBrackets(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h = w) {
+  const len = Math.max(4, Math.min(w, h) * 0.28);
   const o = 2;
+  const r = x + w + o;
+  const b = y + h + o;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -342,17 +350,17 @@ function drawBrackets(ctx: CanvasRenderingContext2D, color: string, x: number, y
   ctx.lineTo(x - o, y - o);
   ctx.lineTo(x - o + len, y - o);
   // top-right
-  ctx.moveTo(x + size + o - len, y - o);
-  ctx.lineTo(x + size + o, y - o);
-  ctx.lineTo(x + size + o, y - o + len);
+  ctx.moveTo(r - len, y - o);
+  ctx.lineTo(r, y - o);
+  ctx.lineTo(r, y - o + len);
   // bottom-right
-  ctx.moveTo(x + size + o, y + size + o - len);
-  ctx.lineTo(x + size + o, y + size + o);
-  ctx.lineTo(x + size + o - len, y + size + o);
+  ctx.moveTo(r, b - len);
+  ctx.lineTo(r, b);
+  ctx.lineTo(r - len, b);
   // bottom-left
-  ctx.moveTo(x - o + len, y + size + o);
-  ctx.lineTo(x - o, y + size + o);
-  ctx.lineTo(x - o, y + size + o - len);
+  ctx.moveTo(x - o + len, b);
+  ctx.lineTo(x - o, b);
+  ctx.lineTo(x - o, b - len);
   ctx.stroke();
 }
 

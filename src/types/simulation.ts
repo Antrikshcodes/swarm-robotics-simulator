@@ -566,7 +566,15 @@ export interface SimulationSnapshot {
   readonly metrics: FleetMetrics;
 }
 
+/**
+ * What the operator is inspecting. UI state only: selecting never changes the
+ * engine. Racks and obstacles are addressed by the cell that was picked; the
+ * inspector resolves the whole rack block / obstacle from the layout. Open
+ * cells (floor, lanes, narrow aisles) are `cell`.
+ */
 export type EntitySelection =
   | { readonly kind: "robot"; readonly id: string }
   | { readonly kind: "station"; readonly id: string }
+  | { readonly kind: "rack"; readonly x: number; readonly y: number }
+  | { readonly kind: "obstacle"; readonly x: number; readonly y: number }
   | { readonly kind: "cell"; readonly x: number; readonly y: number };
