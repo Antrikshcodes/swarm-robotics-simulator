@@ -164,6 +164,8 @@ export function drawWarehouse(
     }
   }
   if (options.showReservations && selectedRobot) drawReservationTicks(ctx, theme, view, snapshot, selectedRobot);
+  // Deadlock overlays are safety-critical state, so they are always drawn.
+  drawDeadlockOverlays(ctx, theme, view, snapshot);
 
   // Hover outline
   if (options.hover) {
@@ -477,13 +479,16 @@ function drawWaitLinks(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: 
   const { cell, offsetX: ox, offsetY: oy } = view;
   const robots = new Map(snapshot.robots.map((r) => [r.id, r]));
   ctx.save();
-  ctx.strokeStyle = withAlpha(theme.amber, 0.8);
-  ctx.fillStyle = withAlpha(theme.amber, 0.9);
   ctx.lineWidth = Math.max(1, cell * 0.05);
   for (const edge of snapshot.coordination.waitGraph) {
     const a = robots.get(edge.robotId);
     const b = robots.get(edge.waitingFor);
     if (!a || !b) continue;
+    // Edges inside a deadlock group are red; everything else is ordinary waiting.
+    const critical = a.deadlockId !== null && a.deadlockId === b.deadlockId;
+    const color = critical ? theme.red : theme.amber;
+    ctx.strokeStyle = withAlpha(color, critical ? 0.95 : 0.8);
+    ctx.fillStyle = withAlpha(color, 0.95);
     const pa = interpolated(a, progress);
     const pb = interpolated(b, progress);
     const ax = ox + (pa.x + 0.5) * cell;
@@ -531,6 +536,67 @@ function drawWaitLinks(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: 
   ctx.restore();
 }
 
+/**
+ * Open deadlock incidents: contested (blocking) cells, and for an active
+ * recovery attempt the yielder's route and its holding position.
+ */
+function drawDeadlockOverlays(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: RenderView, snapshot: SimulationSnapshot) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  const centre = (p: GridPoint) => [ox + (p.x + 0.5) * cell, oy + (p.y + 0.5) * cell] as const;
+  ctx.save();
+  for (const incident of snapshot.deadlocks.incidents) {
+    if (incident.status === "resolved") continue;
+    const color = theme.red;
+    // Blocking cells: red corner ticks + light wash.
+    for (const c of incident.blockingCells) {
+      const x = ox + c.x * cell;
+      const y = oy + c.y * cell;
+      ctx.fillStyle = withAlpha(color, 0.1);
+      ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+      drawBrackets(ctx, withAlpha(color, 0.9), x + 2, y + 2, cell - 4);
+    }
+    const attempt = incident.attempts.at(-1);
+    if (incident.status !== "recovering" || !attempt || attempt.outcome !== "in-progress" || !attempt.holdingCell) continue;
+    const yielder = snapshot.robots.find((r) => r.id === attempt.yielderId);
+    // Recovery route: from the yielder's live position along the planned path.
+    let remaining: GridPoint[] = [...attempt.route];
+    if (yielder) {
+      const here = remaining.findIndex((p) => p.x === yielder.position.x && p.y === yielder.position.y);
+      remaining = [yielder.position, ...remaining.slice(here + 1)];
+    }
+    if (remaining.length > 1) {
+      ctx.strokeStyle = withAlpha(theme.cyan, 0.85);
+      ctx.lineWidth = Math.max(1.5, cell * 0.07);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.setLineDash([Math.max(3, cell * 0.18), Math.max(2, cell * 0.1)]);
+      ctx.beginPath();
+      remaining.forEach((p, i) => {
+        const [px, py] = centre(p);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Holding position: cyan square with an "H".
+    const hx = ox + attempt.holdingCell.x * cell;
+    const hy = oy + attempt.holdingCell.y * cell;
+    const inset = cell * 0.14;
+    ctx.strokeStyle = theme.cyan;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(hx + inset, hy + inset, cell - inset * 2, cell - inset * 2);
+    if (cell >= 18) {
+      ctx.fillStyle = withAlpha(theme.cyan, 0.9);
+      ctx.font = `700 ${Math.round(Math.min(11, cell * 0.3))}px ${theme.monoFont}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("H", hx + cell / 2, hy + cell / 2);
+    }
+  }
+  ctx.restore();
+}
+
 /** Small diamond on robots working high / urgent missions. */
 function drawPriorityFlag(
   ctx: CanvasRenderingContext2D,
@@ -568,6 +634,22 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   ctx.roundRect(x, y, w, h, r);
 }
 
+function haloStyle(theme: CanvasTheme, robot: RobotState, faulted: boolean): { color: string; dashed: boolean; strong: boolean } | null {
+  if (faulted) return { color: withAlpha(theme.red, 0.9), dashed: false, strong: false };
+  switch (robot.waitClass) {
+    case "deadlock":
+      return { color: theme.red, dashed: false, strong: true };
+    case "recovering":
+      return { color: withAlpha(theme.red, 0.85), dashed: true, strong: false };
+    case "yielding":
+      return { color: theme.cyan, dashed: false, strong: true };
+    case "congestion":
+      return { color: withAlpha(theme.amber, 0.95), dashed: true, strong: false };
+    default:
+      return robot.status === "waiting" ? { color: withAlpha(theme.amber, 0.6), dashed: true, strong: false } : null;
+  }
+}
+
 function drawRobot(
   ctx: CanvasRenderingContext2D,
   theme: CanvasTheme,
@@ -587,11 +669,14 @@ function drawRobot(
 
   ctx.save();
 
-  // Status halo for states that need attention.
-  if (robot.status === "waiting" || faulted) {
-    ctx.strokeStyle = withAlpha(faulted ? theme.red : theme.amber, 0.9);
-    ctx.lineWidth = Math.max(1.5, cell * 0.06);
-    ctx.setLineDash(faulted ? [] : [Math.max(2, cell * 0.1), Math.max(2, cell * 0.08)]);
+  // Status halo for states that need attention. Deadlock classes take
+  // precedence: red solid = deadlocked, red dashed = recovering,
+  // cyan = yielding to a holding position, amber dashed = waiting/congestion.
+  const halo = haloStyle(theme, robot, faulted);
+  if (halo) {
+    ctx.strokeStyle = halo.color;
+    ctx.lineWidth = Math.max(1.5, cell * (halo.strong ? 0.08 : 0.06));
+    ctx.setLineDash(halo.dashed ? [Math.max(2, cell * 0.1), Math.max(2, cell * 0.08)] : []);
     roundedRect(ctx, cx - half - 3, cy - half - 3, size + 6, size + 6, size * 0.3);
     ctx.stroke();
     ctx.setLineDash([]);

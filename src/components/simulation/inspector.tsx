@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import {
   ArrowUp,
   Box,
@@ -25,7 +26,17 @@ import { BatteryMeter } from "@/components/fleet/battery-meter";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
-import { MISSION_STATE, PACKAGE_STATE, ROBOT_ACTION, ROBOT_STATUS, STATION_KIND, type Tone } from "@/lib/status";
+import {
+  DEADLOCK_STATUS,
+  MISSION_STATE,
+  PACKAGE_STATE,
+  ROBOT_ACTION,
+  ROBOT_STATUS,
+  STATION_KIND,
+  TONE_TEXT,
+  WAIT_CLASS,
+  type Tone,
+} from "@/lib/status";
 import { findRobot, findStation, robotUtilisation } from "@/lib/selectors";
 import { cn } from "@/lib/utils";
 
@@ -294,10 +305,16 @@ function CoordinationSection({ robot, snapshot }: { robot: RobotState; snapshot:
             <Dash />
           )}
         </Row>
+        <Row label="Wait state" mono={false}>
+          <span className={cn("text-xs", TONE_TEXT[WAIT_CLASS[robot.waitClass].tone])} title={WAIT_CLASS[robot.waitClass].description}>
+            {WAIT_CLASS[robot.waitClass].label}
+          </span>
+        </Row>
         <Row label="Plan">{robot.planStatus ? `${robot.planStatus}${until ? ` · to T+${until}` : ""}` : <Dash />}</Row>
         <Row label="Reserved ticks">{robot.plan.length || <Dash />}</Row>
         <Row label="Planned waits">{waits || <Dash />}</Row>
       </dl>
+      <DeadlockNote robot={robot} snapshot={snapshot} />
       {robot.plan.length ? (
         <ol className="mt-2 flex flex-wrap gap-1">
           {robot.plan.slice(0, 8).map((step) => (
@@ -326,6 +343,35 @@ function CoordinationSection({ robot, snapshot }: { robot: RobotState; snapshot:
   );
 }
 
+/** The robot's deadlock incident, if any: status, its role, and a link to the incident. */
+function DeadlockNote({ robot, snapshot }: { robot: RobotState; snapshot: SimulationSnapshot }) {
+  const incident = robot.deadlockId ? snapshot.deadlocks.incidents.find((i) => i.id === robot.deadlockId) : undefined;
+  if (!incident) return null;
+  const status = DEADLOCK_STATUS[incident.status];
+  const attempt = incident.attempts.at(-1);
+  const role =
+    robot.waitClass === "yielding"
+      ? `Yielding to ${attempt?.holdingCell ? cellRef(attempt.holdingCell) : "a holding position"} so the group can pass.`
+      : incident.status === "failed"
+        ? `Holding safely: ${incident.failureReason ?? "no safe recovery"}.`
+        : incident.status === "recovering" && attempt
+          ? `Waiting while ${attempt.yielderId} yields (attempt ${attempt.attempt}/${snapshot.deadlocks.thresholds.maxAttempts}).`
+          : `In a circular wait with ${incident.robots.filter((id) => id !== robot.id).join(", ")}.`;
+  return (
+    <div className={cn("mt-2 rounded-md border px-2.5 py-2", status.tone === "cyan" ? "border-cyan/30 bg-cyan/[0.05]" : "border-danger/30 bg-danger/[0.05]")}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn("text-[11.5px] font-medium", TONE_TEXT[status.tone])}>
+          {incident.id} · {status.label}
+        </span>
+        <Link href="/incidents" className="text-[11px] text-text-secondary underline-offset-2 hover:text-foreground hover:underline">
+          Incident
+        </Link>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-text-secondary">{role}</p>
+    </div>
+  );
+}
+
 function CoordinationOverview({ snapshot }: { snapshot: SimulationSnapshot }) {
   const select = useSimulationStore((s) => s.select);
   const { coordination, tick } = snapshot;
@@ -339,6 +385,19 @@ function CoordinationOverview({ snapshot }: { snapshot: SimulationSnapshot }) {
         <Row label="Plans computed">{coordination.stats.plansComputed}</Row>
         <Row label="Right-of-way decisions">{coordination.stats.preemptions}</Row>
         <Row label="Moves rejected at commit">{coordination.stats.commitRejections}</Row>
+        <Row label="Deadlocks">
+          {snapshot.deadlocks.stats.detected ? (
+            <>
+              {snapshot.deadlocks.stats.detected}
+              <span className="ml-1.5 text-text-dim">
+                {snapshot.deadlocks.stats.resolved} resolved · {snapshot.deadlocks.stats.failed} failed
+              </span>
+            </>
+          ) : (
+            <Dash />
+          )}
+        </Row>
+        <Row label="Transient cycles filtered">{snapshot.deadlocks.stats.transientCycles || <Dash />}</Row>
       </dl>
       {recent.length ? (
         <ul className="mt-3 flex flex-col gap-1.5">
@@ -554,10 +613,15 @@ function Legend() {
     { swatch: <span className="size-2 rounded-[1px] bg-cyan/50" />, label: "Reserved cell" },
     { swatch: <span className="size-3 rounded-[2px] border border-dashed border-cyan" />, label: "Planned stop" },
     { swatch: <span className="h-0 w-3 border-t border-dashed border-amber" />, label: "Waiting for" },
+    { swatch: <span className="h-0 w-3 border-t-2 border-danger" />, label: "Deadlock wait" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-danger" />, label: "Deadlocked" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-cyan" />, label: "Yielding" },
+    { swatch: <span className="size-3 rounded-[2px] border border-cyan font-mono text-[7px] leading-[9px] text-cyan">H</span>, label: "Holding position" },
+    { swatch: <span className="size-3 border border-danger bg-danger/10" />, label: "Blocking cell" },
     { swatch: <span className="size-2 rotate-45 bg-danger" />, label: "Urgent mission" },
     { swatch: <span className="size-2.5 rounded-[2px] bg-amber" />, label: "Carrying package" },
-    { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Holding / waiting" },
-    { swatch: <span className="size-3 rounded-[3px] border-2 border-danger" />, label: "Failed" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Waiting / congestion" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-danger/50 bg-danger/10" />, label: "Failed robot" },
   ];
   return (
     <ul className="grid grid-cols-2 gap-x-3 gap-y-2">

@@ -1,5 +1,8 @@
 import type {
+  DeadlockStatus,
   EventSeverity,
+  RecoveryOutcome,
+  WaitClass,
   MissionState,
   PackageState,
   RobotAction,
@@ -88,6 +91,33 @@ export const PACKAGE_STATE: Record<PackageState, { label: string; tone: Tone }> 
   "picked-up": { label: "Picked up", tone: "lime" },
   "in-transit": { label: "In transit", tone: "lime" },
   delivered: { label: "Delivered", tone: "neutral" },
+};
+
+/** Waiting vs congestion vs deadlock states (Mission 004). */
+export const WAIT_CLASS: Record<WaitClass, { label: string; tone: Tone; description: string }> = {
+  none: { label: "Clear", tone: "neutral", description: "Not waiting." },
+  waiting: { label: "Waiting", tone: "neutral", description: "Short planned wait for a reservation." },
+  congestion: { label: "Congestion", tone: "amber", description: "Waiting behind traffic that is still moving; no circular wait." },
+  deadlock: { label: "Deadlock", tone: "red", description: "Part of a confirmed circular wait (or stall) that cannot clear on its own." },
+  recovering: { label: "Recovering", tone: "red", description: "In a deadlock group while another robot yields." },
+  yielding: { label: "Yielding", tone: "cyan", description: "Selected to make way: moving to, or holding at, a safe holding position." },
+};
+
+export const DEADLOCK_STATUS: Record<DeadlockStatus, { label: string; tone: Tone }> = {
+  detected: { label: "Deadlock detected", tone: "red" },
+  recovering: { label: "Recovery in progress", tone: "cyan" },
+  resolved: { label: "Resolved", tone: "lime" },
+  failed: { label: "Recovery failed", tone: "red" },
+};
+
+export const RECOVERY_OUTCOME: Record<RecoveryOutcome, { label: string; tone: Tone }> = {
+  "in-progress": { label: "In progress", tone: "cyan" },
+  resolved: { label: "Resolved", tone: "lime" },
+  escalated: { label: "Escalated", tone: "amber" },
+  "no-holding-position": { label: "No holding position", tone: "red" },
+  "no-route": { label: "No route", tone: "amber" },
+  timeout: { label: "Timed out", tone: "amber" },
+  aborted: { label: "Aborted", tone: "neutral" },
 };
 
 export const SEVERITY: Record<EventSeverity, { label: string; tone: Tone }> = {

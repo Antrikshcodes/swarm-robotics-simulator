@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BatteryWarning, Construction, Crosshair, History, Hourglass, LockOpen, OctagonAlert } from "lucide-react";
+import { BatteryWarning, Construction, Crosshair, History, Hourglass, LockOpen, OctagonAlert, RefreshCcwDot } from "lucide-react";
 import { PageContainer, PageIntro } from "@/components/layout/page-container";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,13 @@ import { FilterTabs } from "@/components/ui/filter-tabs";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Stat } from "@/components/ui/stat";
 import { PlannedNote } from "@/components/ui/planned-note";
+import { DeadlockDetail } from "./deadlock-detail";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { deriveIncidents, type Incident, type IncidentKind } from "@/lib/selectors";
 import { formatTick } from "@/lib/format";
+import { DEADLOCK_STATUS } from "@/lib/status";
+import type { SimEvent } from "@/types/simulation";
 import { cn } from "@/lib/utils";
 
 type Filter = "open" | "resolved" | "all";
@@ -23,16 +26,23 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
   "robot-failed": {
     label: "Robot failure",
     icon: OctagonAlert,
-    mission: "Mission 004",
+    mission: "Later mission",
     planned:
       "Today the engine halts the robot, keeps package custody with it, marks the mission recovery-required, holds its cell permanently and makes other robots plan around it. The recovery manager will transfer custody explicitly and reassign the mission without losing delivery history.",
   },
   "robot-blocked": {
     label: "Blocked robot",
     icon: Hourglass,
+    mission: "Mission 003–004",
+    planned:
+      "Robots plan in space and time over a shared reservation table, so most conflicts become short planned waits. A robot blocked for 3+ ticks shows here with the robot it is waiting for; higher-priority robots take right-of-way after 3 ticks. Waiting behind moving traffic is congestion, not deadlock: only a persistent circular wait in the wait-for graph opens a deadlock incident.",
+  },
+  deadlock: {
+    label: "Deadlock",
+    icon: RefreshCcwDot,
     mission: "Mission 004",
     planned:
-      "Robots plan in space and time over a shared reservation table, so most conflicts become short planned waits. A robot blocked for 3+ ticks shows here with the robot it is waiting for. Higher-priority robots take right-of-way after 3 ticks. Deadlock detection over the wait-for graph and bounded recovery arrive in Mission 004."
+      "Confirmed when a wait-for cycle persists for several ticks with every member waiting. Recovery picks a yielder deterministically (passage occupancy, convoy, urgency, cargo, wait time, then ID), moves it to a safe holding position over reserved cells, and resumes the group. Attempts are bounded; if none is safe the robots hold in place and the incident stays open as failed.",
   },
   "low-battery": {
     label: "Low battery",
@@ -65,7 +75,7 @@ export function IncidentConsole() {
     const sim = useSimulationStore.getState();
     const robot = snapshot.robots.find((r) => r.id === incident.robotId);
     const closure = snapshot.closures.find((c) => c.id === incident.closureId);
-    const focus = robot?.position ?? closure?.cells[0];
+    const focus = incident.deadlock?.blockingCells[0] ?? robot?.position ?? closure?.cells[0];
     if (robot) sim.select({ kind: "robot", id: robot.id });
     else if (closure) sim.select({ kind: "cell", x: closure.cells[0].x, y: closure.cells[0].y });
     if (focus) useViewportStore.getState().centerOn(focus.x, focus.y);
@@ -75,7 +85,9 @@ export function IncidentConsole() {
   const replay = (incident: Incident) => {
     const sim = useSimulationStore.getState();
     sim.pause();
-    sim.seek(incident.openedTick);
+    // Deadlocks: rewind to just before confirmation, to watch the cycle form.
+    const confirm = incident.deadlock ? snapshot.deadlocks.thresholds.confirmTicks + 2 : 0;
+    sim.seek(Math.max(0, incident.openedTick - confirm));
     if (incident.robotId) sim.select({ kind: "robot", id: incident.robotId });
     router.push("/simulation");
   };
@@ -101,7 +113,12 @@ export function IncidentConsole() {
           <Stat label="Open warnings" value={open.filter((i) => i.severity === "warning").length} tone={open.some((i) => i.severity === "warning") ? "amber" : undefined} />
         </Panel>
         <Panel className="p-4">
-          <Stat label="Blocked episodes" value={all.filter((i) => i.kind === "robot-blocked").length} hint="Open + retained history" />
+          <Stat
+            label="Deadlocks"
+            value={snapshot.deadlocks.stats.detected}
+            tone={snapshot.deadlocks.incidents.some((d) => d.status !== "resolved") ? "red" : undefined}
+            hint={`${snapshot.deadlocks.stats.resolved} resolved · ${snapshot.deadlocks.stats.failed} failed · ${snapshot.deadlocks.stats.transientCycles} transient`}
+          />
         </Panel>
         <Panel className="p-4">
           <Stat label="Resolved" value={all.filter((i) => !i.open).length} />
@@ -181,7 +198,14 @@ export function IncidentConsole() {
         <Panel className="flex flex-col">
           <PanelHeader title="Details" />
           {selected ? (
-            <IncidentDetail incident={selected} tick={snapshot.tick} onLocate={locate} onReplay={replay} onReopen={reopen} />
+            <IncidentDetail
+              incident={selected}
+              tick={snapshot.tick}
+              events={snapshot.events}
+              onLocate={locate}
+              onReplay={replay}
+              onReopen={reopen}
+            />
           ) : (
             <p className="px-4 py-12 text-center text-sm text-text-secondary">Select an incident to see details.</p>
           )}
@@ -194,17 +218,43 @@ export function IncidentConsole() {
 function IncidentDetail({
   incident,
   tick,
+  events,
   onLocate,
   onReplay,
   onReopen,
 }: {
   incident: Incident;
   tick: number;
+  events: readonly SimEvent[];
   onLocate: (i: Incident) => void;
   onReplay: (i: Incident) => void;
   onReopen: (i: Incident) => void;
 }) {
   const meta = KIND[incident.kind];
+  if (incident.deadlock) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{incident.title}</span>
+          <span className="sr-only">{DEADLOCK_STATUS[incident.deadlock.status].label}</span>
+        </div>
+        <DeadlockDetail incident={incident.deadlock} events={events} tick={tick} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" className="border-line" onClick={() => onLocate(incident)}>
+            <Crosshair />
+            Locate group
+          </Button>
+          <Button size="sm" variant="outline" className="border-line" onClick={() => onReplay(incident)}>
+            <History />
+            Replay formation
+          </Button>
+        </div>
+        <PlannedNote mission={meta.mission} className="mt-auto">
+          {meta.planned}
+        </PlannedNote>
+      </div>
+    );
+  }
   const rows: [string, string][] = [
     ["Incident", incident.id],
     ["Type", meta.label],

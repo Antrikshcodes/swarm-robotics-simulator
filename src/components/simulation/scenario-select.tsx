@@ -6,11 +6,19 @@ import { useSimulationStore } from "@/store/simulation-store";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+
+const GROUPS = [
+  { id: "operations", label: "Operations" },
+  { id: "lab", label: "Deadlock lab" },
+] as const;
 
 export function ScenarioSelect({ className, compact = false }: { className?: string; compact?: boolean }) {
   const scenarioId = useSimulationStore((s) => s.scenarioId);
@@ -31,15 +39,21 @@ export function ScenarioSelect({ className, compact = false }: { className?: str
         <SelectValue placeholder="Scenario" />
       </SelectTrigger>
       <SelectContent position="popper" align="start" className="w-72">
-        {SCENARIOS.map((scenario) => (
-          <SelectItem key={scenario.id} value={scenario.id} className="py-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[13px]">{scenario.name}</span>
-              <span className="text-[11px] text-text-secondary in-data-[slot=select-value]:hidden">
-                {scenario.summary}
-              </span>
-            </div>
-          </SelectItem>
+        {GROUPS.map((group, index) => (
+          <SelectGroup key={group.id}>
+            {index > 0 ? <SelectSeparator /> : null}
+            <SelectLabel className="text-[10.5px] tracking-wide uppercase">{group.label}</SelectLabel>
+            {SCENARIOS.filter((s) => (s.group ?? "operations") === group.id).map((scenario) => (
+              <SelectItem key={scenario.id} value={scenario.id} className="py-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[13px]">{scenario.name}</span>
+                  <span className="text-[11px] text-text-secondary in-data-[slot=select-value]:hidden">
+                    {scenario.summary}
+                  </span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectGroup>
         ))}
       </SelectContent>
     </Select>

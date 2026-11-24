@@ -580,7 +580,7 @@ export class DeadlockManager {
       events.push({
         kind: "robot_yielded",
         severity: "info",
-        message: `${yielderId} yields: releasing its reservations and moving to a holding position ${holding.route.length} cells away`,
+        message: `${yielderId} yields: releasing its reservations and moving to a holding position ${holding.route.length} cell${holding.route.length === 1 ? "" : "s"} away`,
         robotIds: incident.robots,
         robotId: yielderId,
         incidentId: incident.id,
