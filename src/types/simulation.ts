@@ -1,11 +1,8 @@
 /**
- * Shared simulation domain types.
+ * Shared simulation domain types — the read-only snapshot contract between
+ * the engine (src/engine) and the UI. See API_CONTRACTS.md.
  *
- * These types describe the read-only snapshot contract between the
- * simulation layer and the UI (see API_CONTRACTS.md). Mission 001 fills
- * them from a deterministic *demo playback* (src/engine/demo-playback.ts).
- * The real coordination engine (Missions 002–006) is expected to emit the
- * same snapshot shape so the UI does not need to be rewritten.
+ * Everything here is produced by WarehouseEngine. The UI never mutates it.
  */
 
 /** Grid coordinate. `x` is the column, `y` is the row (origin top-left). */
@@ -15,6 +12,8 @@ export interface GridPoint {
 }
 
 export type Heading = "N" | "E" | "S" | "W";
+
+// ------------------------------------------------------------------ world
 
 export type CellKind =
   | "floor"
@@ -35,6 +34,7 @@ export interface Station {
   readonly position: GridPoint;
 }
 
+/** Static warehouse geometry. Dynamic closures live in the snapshot. */
 export interface WarehouseLayout {
   readonly width: number;
   readonly height: number;
@@ -43,21 +43,47 @@ export interface WarehouseLayout {
   readonly stations: readonly Station[];
 }
 
+/** A dynamic aisle closure: cells that new plans may not enter. */
+export interface Closure {
+  readonly id: string;
+  readonly cells: readonly GridPoint[];
+  readonly label: string;
+  readonly createdTick: number;
+}
+
+// ----------------------------------------------------------------- robots
+
 export type RobotStatus =
   | "idle"
   | "moving"
+  | "carrying"
+  | "waiting"
   | "loading"
   | "unloading"
-  | "waiting"
   | "charging"
-  | "fault";
+  | "failed"
+  | "recovering";
+
+/** What the robot is trying to do, independent of whether it moved this tick. */
+export type RobotAction =
+  | "none"
+  | "travel-to-pickup"
+  | "travel-to-dropoff"
+  | "return-home"
+  | "travel-to-charger"
+  | "loading"
+  | "unloading"
+  | "charging"
+  | "halted";
 
 export interface RobotStats {
   readonly movingTicks: number;
   readonly waitingTicks: number;
+  /** Ticks spent moving, loading or unloading. */
   readonly busyTicks: number;
   readonly distance: number;
   readonly deliveries: number;
+  readonly replans: number;
 }
 
 export interface RobotState {
@@ -70,28 +96,44 @@ export interface RobotState {
   readonly previousPosition: GridPoint;
   readonly heading: Heading;
   readonly status: RobotStatus;
-  /** Sample telemetry in percent. Not a modelled battery. */
+  readonly action: RobotAction;
+  /** Simplified battery model, percent. */
   readonly battery: number;
+  readonly home: GridPoint;
   readonly missionId: string | null;
   readonly packageId: string | null;
-  /** Station the robot is currently heading to, if any. */
+  /** Station the robot is heading to or working at, if any. */
   readonly destinationStationId: string | null;
-  /** Remaining scripted cells until the destination (excludes current cell). */
+  /** Cell the current plan ends at, if any. */
+  readonly destination: GridPoint | null;
+  /** Remaining planned cells (A* output), excluding the current cell. */
   readonly route: readonly GridPoint[];
-  /** Human-readable note for the current activity (e.g. scripted wait reason). */
+  /** Consecutive ticks the robot has been unable to take its next step. */
+  readonly blockedTicks: number;
+  /** Human-readable explanation of the current activity. */
   readonly activityNote: string | null;
   readonly stats: RobotStats;
 }
 
-/** Mission lifecycle — subset of SIMULATION_RULES.md states used so far. */
+// --------------------------------------------------------------- missions
+
 export type MissionState =
   | "queued"
   | "assigned"
   | "to-pickup"
+  | "picking-up"
   | "carrying"
+  | "to-dropoff"
+  | "dropping-off"
   | "completed"
   | "cancelled"
   | "recovery-required";
+
+export interface MissionTransition {
+  readonly tick: number;
+  readonly from: MissionState | null;
+  readonly to: MissionState;
+}
 
 export interface Mission {
   readonly id: string;
@@ -101,24 +143,71 @@ export interface Mission {
   readonly dropoffStationId: string;
   readonly state: MissionState;
   readonly createdTick: number;
+  readonly assignedTick: number | null;
   readonly pickedTick: number | null;
   readonly completedTick: number | null;
+  readonly history: readonly MissionTransition[];
 }
+
+// --------------------------------------------------------------- packages
+
+export type PackageState = "available" | "reserved" | "picked-up" | "in-transit" | "delivered";
+
+export type PackageLocation =
+  | { readonly kind: "station"; readonly stationId: string }
+  | { readonly kind: "robot"; readonly robotId: string }
+  | { readonly kind: "delivered"; readonly stationId: string };
+
+export interface CustodyRecord {
+  readonly tick: number;
+  readonly from: PackageState | null;
+  readonly to: PackageState;
+  readonly robotId: string | null;
+  readonly note: string;
+}
+
+export interface Package {
+  readonly id: string;
+  readonly missionId: string;
+  readonly state: PackageState;
+  readonly originStationId: string;
+  readonly destinationStationId: string;
+  /** The single robot that owns (reserved or carries) the package, if any. */
+  readonly holderRobotId: string | null;
+  readonly location: PackageLocation;
+  readonly history: readonly CustodyRecord[];
+}
+
+// ----------------------------------------------------------------- events
 
 export type EventSeverity = "info" | "success" | "warning" | "critical";
 
 export type SimEventKind =
   | "scenario-loaded"
+  | "simulation-started"
+  | "simulation-paused"
+  | "mission-created"
   | "mission-assigned"
-  | "pickup-complete"
-  | "delivery-complete"
+  | "mission-cancelled"
+  | "mission-recovery-required"
+  | "pickup-started"
+  | "package-picked-up"
+  | "dropoff-started"
+  | "package-delivered"
   | "robot-waiting"
+  | "robot-replanned"
+  | "robot-no-path"
+  | "robot-failed"
   | "robot-charging"
-  | "robot-fault"
-  | "battery-low";
+  | "robot-returning-home"
+  | "battery-low"
+  | "aisle-closed"
+  | "aisle-reopened";
 
 export interface SimEvent {
-  /** Monotonic, deterministic sequence number. */
+  /** Stable identifier, e.g. "E-000042" (engine) or "P-000003" (playback). */
+  readonly id: string;
+  /** Monotonic ordering key within its id space. */
   readonly seq: number;
   readonly tick: number;
   readonly kind: SimEventKind;
@@ -126,8 +215,20 @@ export interface SimEvent {
   readonly message: string;
   readonly robotId?: string;
   readonly missionId?: string;
+  readonly packageId?: string;
   readonly stationId?: string;
+  readonly closureId?: string;
 }
+
+/** Per-tick movement record, kept in a separate bounded log. */
+export interface MovementRecord {
+  readonly tick: number;
+  readonly robotId: string;
+  readonly from: GridPoint;
+  readonly to: GridPoint;
+}
+
+// ---------------------------------------------------------------- metrics
 
 export interface FleetMetrics {
   readonly totalRobots: number;
@@ -144,17 +245,22 @@ export interface FleetMetrics {
   readonly utilisation: number;
 }
 
-export type SimulationDataSource = "demo-script" | "engine";
+export type SimulationDataSource = "engine";
 
 export interface SimulationSnapshot {
   readonly source: SimulationDataSource;
   readonly scenarioId: string;
   readonly tick: number;
+  readonly running: boolean;
   readonly layout: WarehouseLayout;
+  readonly closures: readonly Closure[];
   readonly robots: readonly RobotState[];
   readonly missions: readonly Mission[];
-  /** Most recent events, newest last, bounded. */
+  readonly packages: readonly Package[];
+  /** Most recent events, oldest first, bounded. Excludes per-cell movement. */
   readonly events: readonly SimEvent[];
+  /** Most recent movement records, bounded. */
+  readonly movements: readonly MovementRecord[];
   /** Tick of every completed delivery (for throughput analytics). */
   readonly deliveryTicks: readonly number[];
   readonly metrics: FleetMetrics;

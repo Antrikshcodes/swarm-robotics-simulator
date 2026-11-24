@@ -27,7 +27,7 @@ export function EventFeed({
       <AnimatePresence initial={false}>
         {items.map((event) => (
           <motion.li
-            key={event.seq}
+            key={event.id}
             layout="position"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}

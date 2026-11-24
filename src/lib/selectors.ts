@@ -1,4 +1,4 @@
-import { LOW_BATTERY_THRESHOLD } from "@/engine";
+import { BLOCKED_ALERT_TICKS, LOW_BATTERY_THRESHOLD } from "@/engine";
 import type {
   EventSeverity,
   RobotState,
@@ -17,7 +17,7 @@ export function findStation(snapshot: SimulationSnapshot, id: string): Station |
 
 // ------------------------------------------------------------------ incidents
 
-export type IncidentKind = "robot-fault" | "conflict-hold" | "low-battery";
+export type IncidentKind = "robot-failed" | "robot-blocked" | "low-battery" | "aisle-closure";
 
 export interface Incident {
   readonly id: string;
@@ -25,92 +25,123 @@ export interface Incident {
   readonly severity: Extract<EventSeverity, "warning" | "critical">;
   readonly title: string;
   readonly detail: string;
-  readonly robotId: string;
+  readonly robotId: string | null;
   readonly missionId: string | null;
+  readonly closureId: string | null;
   readonly openedTick: number;
   readonly open: boolean;
 }
 
 /**
- * Incidents are derived, never stored: open ones from current robot state,
- * historic ones from the bounded event log.
+ * Incidents are derived, never stored: open ones from current engine state,
+ * resolved ones from the bounded event log. The open count matches
+ * metrics.openIncidents.
  */
 export function deriveIncidents(snapshot: SimulationSnapshot): Incident[] {
   const incidents: Incident[] = [];
-  const openKeys = new Set<string>();
+  const openEventSeqs = new Set<number>();
 
   for (const robot of snapshot.robots) {
-    if (robot.status === "fault") {
-      const opened = lastEvent(snapshot.events, "robot-fault", robot.id);
-      const mission = snapshot.missions.find(
-        (m) => m.robotId === robot.id && m.state === "recovery-required",
-      );
-      openKeys.add(`robot-fault:${robot.id}`);
+    if (robot.status === "failed" || robot.status === "recovering") {
+      const opened = lastEvent(snapshot.events, "robot-failed", robot.id);
+      const mission = snapshot.missions.find((m) => m.robotId === robot.id && m.state === "recovery-required");
+      const pkg = mission ? snapshot.packages.find((p) => p.id === mission.packageId) : undefined;
       incidents.push({
         id: `INC-F-${robot.id}`,
-        kind: "robot-fault",
+        kind: "robot-failed",
         severity: "critical",
-        title: `${robot.id} halted`,
+        title: `${robot.id} failed`,
         detail: mission
-          ? `${robot.activityNote ?? "Fault"}. ${mission.id} (${mission.packageId}) needs recovery — not yet automated.`
-          : (robot.activityNote ?? "Fault"),
+          ? `${robot.activityNote ?? "Failed"}. ${mission.id} is recovery-required; ${mission.packageId} is ${pkg?.state ?? "unknown"} and still held by ${robot.id}.`
+          : (robot.activityNote ?? "Failed"),
         robotId: robot.id,
         missionId: mission?.id ?? null,
+        closureId: null,
         openedTick: opened?.tick ?? snapshot.tick,
         open: true,
       });
+      continue;
     }
-    if (robot.status === "waiting") {
-      const opened = lastEvent(snapshot.events, "robot-waiting", robot.id);
-      openKeys.add(`conflict-hold:${robot.id}`);
+    if (robot.status === "waiting" && robot.blockedTicks >= BLOCKED_ALERT_TICKS) {
+      const noRoute = robot.activityNote?.startsWith("No route") ?? false;
+      const opened = lastEvent(snapshot.events, noRoute ? "robot-no-path" : "robot-waiting", robot.id);
+      if (opened) openEventSeqs.add(opened.seq);
       incidents.push({
-        id: `INC-W-${robot.id}-${opened?.seq ?? 0}`,
-        kind: "conflict-hold",
+        id: `INC-W-${robot.id}-${opened?.seq ?? snapshot.tick - robot.blockedTicks}`,
+        kind: "robot-blocked",
         severity: "warning",
-        title: `${robot.id} holding`,
-        detail: robot.activityNote ?? "Waiting",
+        title: noRoute ? `${robot.id} has no route` : `${robot.id} blocked`,
+        detail: `${robot.activityNote ?? "Waiting"} · ${robot.blockedTicks} ticks`,
         robotId: robot.id,
         missionId: robot.missionId,
-        openedTick: opened?.tick ?? snapshot.tick,
+        closureId: null,
+        openedTick: snapshot.tick - robot.blockedTicks + 1,
         open: true,
       });
     }
-    if (robot.status !== "fault" && robot.battery < LOW_BATTERY_THRESHOLD) {
+    if (robot.battery < LOW_BATTERY_THRESHOLD) {
       const opened = lastEvent(snapshot.events, "battery-low", robot.id);
-      openKeys.add(`low-battery:${robot.id}`);
       incidents.push({
         id: `INC-B-${robot.id}`,
         kind: "low-battery",
         severity: "warning",
         title: `${robot.id} low battery`,
-        detail: `${robot.battery.toFixed(0)}% sample telemetry, below ${LOW_BATTERY_THRESHOLD}% threshold.`,
+        detail: `${robot.battery.toFixed(0)}% — below the ${LOW_BATTERY_THRESHOLD}% threshold. Robots below 15% are not assigned missions.`,
         robotId: robot.id,
         missionId: robot.missionId,
+        closureId: null,
         openedTick: opened?.tick ?? 0,
         open: true,
       });
     }
   }
 
-  // Resolved conflict holds from history.
-  for (const event of snapshot.events) {
-    if (event.kind !== "robot-waiting" || !event.robotId) continue;
-    const robot = findRobot(snapshot, event.robotId);
-    const stillOpen =
-      robot?.status === "waiting" &&
-      lastEvent(snapshot.events, "robot-waiting", robot.id)?.seq === event.seq;
-    if (stillOpen) continue;
+  for (const closure of snapshot.closures) {
     incidents.push({
-      id: `INC-W-${event.robotId}-${event.seq}`,
-      kind: "conflict-hold",
+      id: `INC-C-${closure.id}`,
+      kind: "aisle-closure",
       severity: "warning",
-      title: `${event.robotId} holding`,
-      detail: event.message.replace(`${event.robotId} holding: `, ""),
-      robotId: event.robotId,
-      missionId: event.missionId ?? null,
-      openedTick: event.tick,
-      open: false,
+      title: `${closure.id} active`,
+      detail: `${closure.label} · ${closure.cells.length} cell${closure.cells.length > 1 ? "s" : ""} closed to new routes`,
+      robotId: null,
+      missionId: null,
+      closureId: closure.id,
+      openedTick: closure.createdTick,
+      open: true,
     });
+  }
+
+  // Resolved history from the event log.
+  const openClosures = new Set(snapshot.closures.map((c) => c.id));
+  for (const event of snapshot.events) {
+    if ((event.kind === "robot-waiting" || event.kind === "robot-no-path") && event.robotId && !openEventSeqs.has(event.seq)) {
+      incidents.push({
+        id: `INC-W-${event.robotId}-${event.seq}`,
+        kind: "robot-blocked",
+        severity: "warning",
+        title: event.kind === "robot-no-path" ? `${event.robotId} had no route` : `${event.robotId} was blocked`,
+        detail: event.message,
+        robotId: event.robotId,
+        missionId: event.missionId ?? null,
+        closureId: null,
+        openedTick: event.tick,
+        open: false,
+      });
+    }
+    if (event.kind === "aisle-closed" && event.closureId && !openClosures.has(event.closureId)) {
+      incidents.push({
+        id: `INC-C-${event.closureId}-${event.seq}`,
+        kind: "aisle-closure",
+        severity: "warning",
+        title: `${event.closureId} reopened`,
+        detail: event.message,
+        robotId: null,
+        missionId: null,
+        closureId: event.closureId,
+        openedTick: event.tick,
+        open: false,
+      });
+    }
   }
 
   return incidents.sort((a, b) => Number(b.open) - Number(a.open) || b.openedTick - a.openedTick);

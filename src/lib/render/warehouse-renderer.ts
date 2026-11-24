@@ -116,6 +116,9 @@ export function drawWarehouse(
   }
 
   if (options.showGrid) drawGrid(ctx, theme, view, layout.width, layout.height);
+  for (const closure of snapshot.closures) {
+    for (const c of closure.cells) drawClosedCell(ctx, theme, ox + c.x * cell, oy + c.y * cell, cell);
+  }
 
   // Stations
   for (const station of layout.stations) {
@@ -259,6 +262,29 @@ function drawCell(
   }
 }
 
+/** Dynamic aisle closure: red hatch + border, drawn above the floor. */
+function drawClosedCell(ctx: CanvasRenderingContext2D, theme: CanvasTheme, x: number, y: number, size: number) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, size, size);
+  ctx.clip();
+  ctx.fillStyle = withAlpha(theme.red, 0.12);
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = withAlpha(theme.red, 0.55);
+  ctx.lineWidth = Math.max(1, size * 0.06);
+  const step = Math.max(4, size / 3);
+  ctx.beginPath();
+  for (let d = -size; d < size * 2; d += step) {
+    ctx.moveTo(x + d, y + size);
+    ctx.lineTo(x + d + size, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = withAlpha(theme.red, 0.85);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+}
+
 function drawGrid(
   ctx: CanvasRenderingContext2D,
   theme: CanvasTheme,
@@ -383,7 +409,7 @@ function drawRobot(
   const size = Math.max(8, cell * 0.72);
   const half = size / 2;
   const color = robotColor(theme, robot.colorIndex);
-  const faulted = robot.status === "fault";
+  const faulted = robot.status === "failed";
 
   ctx.save();
 

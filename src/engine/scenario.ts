@@ -1,36 +1,44 @@
-import type { GridPoint, Heading, WarehouseLayout } from "../types/simulation";
-import { isTraversable, parseLayout, samePoint } from "./layout";
+import type { GridPoint, Heading, StationKind, WarehouseLayout } from "../types/simulation";
+import type { WorldCommand } from "./commands";
+import { cellKindAt, inBounds, isTraversable, parseLayout, pointKey } from "./world/layout";
 
 /**
- * Scenario definitions for the Mission 001 demo playback.
+ * Scenario = initial world + deterministic inputs.
  *
- * IMPORTANT: robot movement here is *scripted*. Routes are hand-authored
- * waypoint loops expanded into straight grid segments; there is no
- * pathfinding, reservation, or collision avoidance yet. Those arrive in
- * Missions 003–005 and will replace `program` with planner output.
+ * Robots are placed at their home cells; the engine decides every move
+ * (A* + scheduler). Inputs that drive the run are:
+ *  - `missions`: jobs queued at tick 0
+ *  - `feed`: a seeded generator that queues new jobs on a fixed cadence
+ *  - `schedule`: world commands applied at fixed ticks (e.g. a fault)
  */
-export type ProgramStep =
-  /** Move cell-by-cell through axis-aligned waypoints. */
-  | { readonly op: "travel"; readonly via: readonly GridPoint[] }
-  | { readonly op: "load"; readonly station: string; readonly ticks: number }
-  | { readonly op: "unload"; readonly station: string; readonly ticks: number }
-  | { readonly op: "charge"; readonly station: string; readonly ticks: number }
-  /** Scripted hold — stands in for future coordinator yield decisions. */
-  | { readonly op: "wait"; readonly ticks: number; readonly reason: string };
-
-export interface ScriptedRobot {
+export interface RobotSpec {
   readonly id: string;
   readonly model: string;
   readonly colorIndex: number;
-  readonly start: GridPoint;
+  /** Start cell and parking spot when the robot has no work. */
+  readonly home: GridPoint;
   readonly heading: Heading;
   readonly battery: number;
-  /** Ticks to remain staged before the program starts (phase offset). */
-  readonly startDelay?: number;
-  /** Looped program. Empty = robot stays idle. */
-  readonly program: readonly ProgramStep[];
-  /** Scripted fault injection for demonstrating incident UI. */
-  readonly fault?: { readonly tick: number; readonly reason: string };
+}
+
+export interface MissionSpec {
+  readonly pickup: string;
+  readonly dropoff: string;
+}
+
+export interface MissionFeed {
+  /** A new mission is considered every `intervalTicks` ticks. */
+  readonly intervalTicks: number;
+  /** No new mission while this many are queued or active. */
+  readonly maxOpen: number;
+  /** Candidate pickup → drop-off pairs; the seeded PRNG picks one. */
+  readonly routes: readonly MissionSpec[];
+}
+
+export interface ScheduledCommand {
+  /** Applied while processing this tick, before missions and robots update. */
+  readonly tick: number;
+  readonly command: WorldCommand;
 }
 
 export interface ScenarioDefinition {
@@ -38,94 +46,64 @@ export interface ScenarioDefinition {
   readonly name: string;
   readonly summary: string;
   readonly focus: string;
+  readonly seed: number;
   readonly map: readonly string[];
-  readonly robots: readonly ScriptedRobot[];
-  /** Missions that stay queued: no scheduler exists yet (Mission 003). */
-  readonly backlog: readonly { readonly pickup: string; readonly dropoff: string }[];
-}
-
-export type CompiledStep =
-  | { readonly op: "travel"; readonly cells: readonly GridPoint[] }
-  | Exclude<ProgramStep, { op: "travel" }>;
-
-export interface CompiledRobot extends Omit<ScriptedRobot, "program"> {
-  readonly program: readonly CompiledStep[];
+  readonly robots: readonly RobotSpec[];
+  readonly missions: readonly MissionSpec[];
+  readonly feed?: MissionFeed;
+  readonly schedule?: readonly ScheduledCommand[];
+  /** Ticks spent loading / unloading at a station. */
+  readonly handling: { readonly loadTicks: number; readonly unloadTicks: number };
 }
 
 export interface CompiledScenario {
   readonly definition: ScenarioDefinition;
   readonly layout: WarehouseLayout;
-  readonly robots: readonly CompiledRobot[];
 }
 
-/** Expand axis-aligned waypoints into the cells visited after `from`. */
-export function expandWaypoints(
-  layout: WarehouseLayout,
-  from: GridPoint,
-  via: readonly GridPoint[],
-  context: string,
-): GridPoint[] {
-  const cells: GridPoint[] = [];
-  let cursor = from;
-  for (const target of via) {
-    if (cursor.x !== target.x && cursor.y !== target.y) {
-      throw new Error(
-        `${context}: segment (${cursor.x},${cursor.y})→(${target.x},${target.y}) is not axis-aligned`,
-      );
-    }
-    const dx = Math.sign(target.x - cursor.x);
-    const dy = Math.sign(target.y - cursor.y);
-    while (!samePoint(cursor, target)) {
-      cursor = { x: cursor.x + dx, y: cursor.y + dy };
-      if (!isTraversable(layout, cursor)) {
-        throw new Error(`${context}: cell (${cursor.x},${cursor.y}) is not traversable`);
-      }
-      cells.push(cursor);
-    }
-  }
-  return cells;
+function requireStation(layout: WarehouseLayout, id: string, kind: StationKind, context: string) {
+  const station = layout.stations.find((s) => s.id === id);
+  if (!station) throw new Error(`${context}: unknown station ${id}`);
+  if (station.kind !== kind) throw new Error(`${context}: ${id} is a ${station.kind} station, expected ${kind}`);
 }
 
+function validateJob(layout: WarehouseLayout, job: MissionSpec, context: string) {
+  requireStation(layout, job.pickup, "pickup", context);
+  requireStation(layout, job.dropoff, "dropoff", context);
+}
+
+/** Validate geometry, IDs and references. Throws with a precise message. */
 export function compileScenario(definition: ScenarioDefinition): CompiledScenario {
   const layout = parseLayout(definition.map);
-  const stationIds = new Set(layout.stations.map((s) => s.id));
-  const seenIds = new Set<string>();
+  const ctx = definition.id;
+  const ids = new Set<string>();
+  const homes = new Set<string>();
 
-  const robots = definition.robots.map((robot): CompiledRobot => {
-    const context = `${definition.id}/${robot.id}`;
-    if (seenIds.has(robot.id)) throw new Error(`${context}: duplicate robot id`);
-    seenIds.add(robot.id);
-    if (!isTraversable(layout, robot.start)) {
-      throw new Error(`${context}: start cell is not traversable`);
+  for (const robot of definition.robots) {
+    const where = `${ctx}/${robot.id}`;
+    if (ids.has(robot.id)) throw new Error(`${where}: duplicate robot id`);
+    ids.add(robot.id);
+    if (!inBounds(layout, robot.home)) throw new Error(`${where}: home is outside the warehouse`);
+    if (!isTraversable(layout, robot.home)) {
+      throw new Error(`${where}: home (${robot.home.x}, ${robot.home.y}) is a ${cellKindAt(layout, robot.home)} cell`);
     }
-
-    let cursor = robot.start;
-    const program = robot.program.map((step, index): CompiledStep => {
-      if (step.op === "travel") {
-        const cells = expandWaypoints(layout, cursor, step.via, `${context} step ${index}`);
-        if (cells.length > 0) cursor = cells[cells.length - 1];
-        return { op: "travel", cells };
-      }
-      if (step.op !== "wait" && !stationIds.has(step.station)) {
-        throw new Error(`${context} step ${index}: unknown station ${step.station}`);
-      }
-      if (step.ticks < 1) throw new Error(`${context} step ${index}: ticks must be ≥ 1`);
-      return step;
-    });
-
-    if (program.length > 0 && !samePoint(cursor, robot.start)) {
-      throw new Error(
-        `${context}: program must loop back to its start (${robot.start.x},${robot.start.y}); ends at (${cursor.x},${cursor.y})`,
-      );
-    }
-    return { ...robot, program };
-  });
-
-  for (const job of definition.backlog) {
-    if (!stationIds.has(job.pickup) || !stationIds.has(job.dropoff)) {
-      throw new Error(`${definition.id}: backlog references unknown station`);
-    }
+    const kind = cellKindAt(layout, robot.home);
+    if (kind === "pickup" || kind === "dropoff") throw new Error(`${where}: robots may not park on a pickup/drop-off station`);
+    const key = pointKey(robot.home);
+    if (homes.has(key)) throw new Error(`${where}: home cell shared with another robot`);
+    homes.add(key);
+    if (robot.battery < 0 || robot.battery > 100) throw new Error(`${where}: battery must be 0–100`);
   }
 
-  return { definition, layout, robots };
+  definition.missions.forEach((job, i) => validateJob(layout, job, `${ctx} mission ${i}`));
+  definition.feed?.routes.forEach((job, i) => validateJob(layout, job, `${ctx} feed route ${i}`));
+  if (definition.feed && definition.feed.intervalTicks < 1) throw new Error(`${ctx}: feed interval must be ≥ 1`);
+  for (const entry of definition.schedule ?? []) {
+    if (!Number.isInteger(entry.tick) || entry.tick < 1) throw new Error(`${ctx}: scheduled command tick must be ≥ 1`);
+  }
+  if (definition.handling.loadTicks < 1 || definition.handling.unloadTicks < 1) {
+    throw new Error(`${ctx}: handling ticks must be ≥ 1`);
+  }
+
+  return { definition, layout };
 }

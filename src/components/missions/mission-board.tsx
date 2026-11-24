@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
+import { isActiveMission } from "@/engine";
 import type { Mission, MissionState } from "@/types/simulation";
+
+const CANCELLABLE: ReadonlySet<MissionState> = new Set(["queued", "assigned", "to-pickup"]);
 import { PageContainer, PageIntro } from "@/components/layout/page-container";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { DataSourceBadge } from "@/components/ui/data-source-badge";
@@ -15,15 +18,15 @@ import { RobotChip } from "@/components/fleet/robot-chip";
 import { useSimulationStore } from "@/store/simulation-store";
 import { averageCycleTicks } from "@/lib/selectors";
 import { formatTick } from "@/lib/format";
-import { MISSION_STATE } from "@/lib/status";
+import { MISSION_STATE, PACKAGE_STATE } from "@/lib/status";
+import { IconButton } from "@/components/ui/icon-button";
+import { NewMissionForm } from "./new-mission-form";
 
 type Filter = "all" | "active" | "queued" | "completed" | "recovery";
 
-const ACTIVE: ReadonlySet<MissionState> = new Set(["assigned", "to-pickup", "carrying"]);
-
 const MATCH: Record<Filter, (m: Mission) => boolean> = {
   all: () => true,
-  active: (m) => ACTIVE.has(m.state),
+  active: (m) => isActiveMission(m.state),
   queued: (m) => m.state === "queued",
   completed: (m) => m.state === "completed",
   recovery: (m) => m.state === "recovery-required",
@@ -32,7 +35,7 @@ const MATCH: Record<Filter, (m: Mission) => boolean> = {
 /** Active first, then queued, then most recent completions. */
 function order(m: Mission): number {
   if (m.state === "recovery-required") return 0;
-  if (ACTIVE.has(m.state)) return 1;
+  if (isActiveMission(m.state)) return 1;
   if (m.state === "queued") return 2;
   return 3;
 }
@@ -43,6 +46,8 @@ export function MissionBoard() {
   const robotColour = new Map(snapshot.robots.map((r) => [r.id, r.colorIndex]));
   const count = (f: Filter) => snapshot.missions.filter(MATCH[f]).length;
   const avg = averageCycleTicks(snapshot);
+  const dispatch = useSimulationStore((s) => s.dispatch);
+  const packageById = new Map(snapshot.packages.map((p) => [p.id, p]));
 
   const missions = snapshot.missions
     .filter(MATCH[filter])
@@ -60,10 +65,20 @@ export function MissionBoard() {
       <Panel>
         <PanelBody className="grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-5">
           <Stat label="Active" value={snapshot.metrics.activeMissions} tone="cyan" />
-          <Stat label="Queued" value={snapshot.metrics.queuedMissions} hint="Awaiting a scheduler" />
+          <Stat label="Queued" value={snapshot.metrics.queuedMissions} hint="Waiting for a free robot" />
           <Stat label="Waiting" value={snapshot.metrics.waitingMissions} tone={snapshot.metrics.waitingMissions ? "amber" : undefined} hint="Robot on hold" />
           <Stat label="Delivered" value={snapshot.metrics.completedDeliveries} tone="lime" />
           <Stat label="Avg cycle" value={avg === null ? "—" : avg.toFixed(1)} unit={avg === null ? undefined : "ticks"} hint="Assigned → delivered" />
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelHeader
+          title="New mission"
+          description="Queued missions are assigned to the nearest available robot by A* distance on the next tick"
+        />
+        <PanelBody>
+          <NewMissionForm />
         </PanelBody>
       </Panel>
 
@@ -94,22 +109,25 @@ export function MissionBoard() {
               <Th>Robot</Th>
               <Th>Pickup → drop-off</Th>
               <Th>State</Th>
+              <Th>Custody</Th>
               <Th className="text-right">Created</Th>
               <Th className="text-right">Picked</Th>
               <Th className="text-right">Delivered</Th>
               <Th className="text-right">Cycle</Th>
+              <Th className="w-12"><span className="sr-only">Actions</span></Th>
             </Tr>
           </THead>
           <tbody>
             {missions.length === 0 ? (
               <Tr>
-                <Td colSpan={9} className="h-24 text-center text-text-secondary">
+                <Td colSpan={11} className="h-24 text-center text-text-secondary">
                   No missions in this state at {formatTick(snapshot.tick)}.
                 </Td>
               </Tr>
             ) : (
               missions.map((m) => {
                 const meta = MISSION_STATE[m.state];
+                const pkg = packageById.get(m.packageId);
                 return (
                   <Tr key={m.id} className="hover:bg-white/[0.02]">
                     <Td className="font-mono font-medium">{m.id}</Td>
@@ -131,6 +149,19 @@ export function MissionBoard() {
                     <Td>
                       <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
                     </Td>
+                    <Td
+                      className="text-text-secondary"
+                      title={pkg?.history.map((h) => `${formatTick(h.tick)} ${h.note}`).join("\n")}
+                    >
+                      {pkg ? (
+                        <span className="text-xs">
+                          {PACKAGE_STATE[pkg.state].label}
+                          {pkg.holderRobotId ? <span className="font-mono text-text-dim"> · {pkg.holderRobotId}</span> : null}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </Td>
                     <Td className="tabular text-right font-mono text-text-secondary">{formatTick(m.createdTick)}</Td>
                     <Td className="tabular text-right font-mono text-text-secondary">
                       {m.pickedTick === null ? "—" : formatTick(m.pickedTick)}
@@ -141,6 +172,17 @@ export function MissionBoard() {
                     <Td className="tabular text-right font-mono">
                       {m.completedTick === null ? "—" : `${m.completedTick - m.createdTick}`}
                     </Td>
+                    <Td>
+                      {CANCELLABLE.has(m.state) ? (
+                        <IconButton
+                          label={`Cancel ${m.id}`}
+                          side="left"
+                          onClick={() => dispatch({ type: "cancel-mission", missionId: m.id })}
+                        >
+                          <X />
+                        </IconButton>
+                      ) : null}
+                    </Td>
                   </Tr>
                 );
               })
@@ -149,10 +191,11 @@ export function MissionBoard() {
         </Table>
       </Panel>
 
-      <PlannedNote mission="Mission 003">
-        Missions are currently generated by each robot&apos;s scripted loop. Queued backlog jobs stay queued because no
-        scheduler exists yet. Live mission creation, assignment and A* routing arrive in Mission 003. The log keeps the
-        latest 120 completed missions.
+      <PlannedNote mission="Missions 003–006">
+        Implemented: queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed,
+        cancellation before pickup, and recovery-required on robot failure. Missing: priorities and deadlines, batching,
+        smarter assignment than nearest-robot, and automatic recovery of recovery-required missions. The log keeps the
+        latest 200 finished missions; hover a custody cell for the package&apos;s full custody trail.
       </PlannedNote>
     </PageContainer>
   );

@@ -20,14 +20,14 @@ import { robotUtilisation } from "@/lib/selectors";
 import { RobotChip } from "./robot-chip";
 import { BatteryMeter } from "./battery-meter";
 
-type Filter = "all" | "working" | "waiting" | "idle" | "fault";
+type Filter = "all" | "working" | "waiting" | "idle" | "failed";
 
 const MATCH: Record<Filter, (s: RobotStatus) => boolean> = {
   all: () => true,
-  working: (s) => s === "moving" || s === "loading" || s === "unloading",
+  working: (s) => s === "moving" || s === "carrying" || s === "loading" || s === "unloading",
   waiting: (s) => s === "waiting",
   idle: (s) => s === "idle" || s === "charging",
-  fault: (s) => s === "fault",
+  failed: (s) => s === "failed" || s === "recovering",
 };
 
 export function FleetRoster() {
@@ -70,7 +70,7 @@ export function FleetRoster() {
                 { value: "working", label: "Working", count: count("working") },
                 { value: "waiting", label: "Waiting", count: count("waiting") },
                 { value: "idle", label: "Idle", count: count("idle") },
-                { value: "fault", label: "Fault", count: count("fault") },
+                { value: "failed", label: "Failed", count: count("failed") },
               ]}
             />
           }
@@ -163,8 +163,9 @@ export function FleetRoster() {
       </Panel>
 
       <PlannedNote mission="Mission 006">
-        Fleet actions — mark a robot unavailable, inject a failure, and transfer package custody — arrive with the
-        recovery manager. Battery values here are sample telemetry, not a battery model.
+        Recovery actions — returning a failed robot to service and transferring its package custody — arrive with
+        the recovery manager. Today you can mark a robot failed from the Simulation Studio inspector. Battery uses a
+        simplified drain / charge model.
       </PlannedNote>
     </PageContainer>
   );

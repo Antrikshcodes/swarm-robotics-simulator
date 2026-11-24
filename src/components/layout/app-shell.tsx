@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CommandToast } from "@/components/layout/command-toast";
 import { MotionProvider } from "@/components/layout/motion-provider";
 import { PlaybackDriver } from "@/components/layout/playback-driver";
 import { TopBar } from "@/components/layout/top-bar";
@@ -19,6 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </main>
           </div>
         </div>
+        <CommandToast />
       </TooltipProvider>
     </MotionProvider>
   );

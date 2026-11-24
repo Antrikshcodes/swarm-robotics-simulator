@@ -1,6 +1,8 @@
 import type {
   EventSeverity,
   MissionState,
+  PackageState,
+  RobotAction,
   RobotStatus,
   StationKind,
 } from "@/types/simulation";
@@ -44,22 +46,47 @@ export const TONE_VAR: Record<Tone, string> = {
 
 export const ROBOT_STATUS: Record<RobotStatus, { label: string; tone: Tone }> = {
   moving: { label: "Moving", tone: "cyan" },
+  carrying: { label: "Carrying", tone: "cyan" },
   loading: { label: "Loading", tone: "cyan" },
   unloading: { label: "Unloading", tone: "cyan" },
   waiting: { label: "Waiting", tone: "amber" },
   charging: { label: "Charging", tone: "lime" },
   idle: { label: "Idle", tone: "neutral" },
-  fault: { label: "Fault", tone: "red" },
+  failed: { label: "Failed", tone: "red" },
+  recovering: { label: "Recovering", tone: "amber" },
+};
+
+export const ROBOT_ACTION: Record<RobotAction, string> = {
+  none: "No task",
+  "travel-to-pickup": "Travelling to pickup",
+  "travel-to-dropoff": "Travelling to drop-off",
+  "return-home": "Returning home",
+  "travel-to-charger": "Heading to charger",
+  loading: "Loading",
+  unloading: "Unloading",
+  charging: "Charging",
+  halted: "Halted",
 };
 
 export const MISSION_STATE: Record<MissionState, { label: string; tone: Tone }> = {
   queued: { label: "Queued", tone: "neutral" },
   assigned: { label: "Assigned", tone: "cyan" },
   "to-pickup": { label: "To pickup", tone: "cyan" },
+  "picking-up": { label: "Picking up", tone: "cyan" },
   carrying: { label: "Carrying", tone: "lime" },
+  "to-dropoff": { label: "To drop-off", tone: "lime" },
+  "dropping-off": { label: "Dropping off", tone: "lime" },
   completed: { label: "Completed", tone: "neutral" },
   cancelled: { label: "Cancelled", tone: "neutral" },
   "recovery-required": { label: "Recovery required", tone: "red" },
+};
+
+export const PACKAGE_STATE: Record<PackageState, { label: string; tone: Tone }> = {
+  available: { label: "Available", tone: "neutral" },
+  reserved: { label: "Reserved", tone: "cyan" },
+  "picked-up": { label: "Picked up", tone: "lime" },
+  "in-transit": { label: "In transit", tone: "lime" },
+  delivered: { label: "Delivered", tone: "neutral" },
 };
 
 export const SEVERITY: Record<EventSeverity, { label: string; tone: Tone }> = {

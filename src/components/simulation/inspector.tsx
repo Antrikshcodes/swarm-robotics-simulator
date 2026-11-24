@@ -7,7 +7,10 @@ import {
   Crosshair,
   MapPin,
   Navigation,
+  Lock,
+  LockOpen,
   Package,
+  PowerOff,
   Warehouse,
   X,
 } from "lucide-react";
@@ -17,11 +20,12 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { RobotChip } from "@/components/fleet/robot-chip";
+import { NewMissionForm } from "@/components/missions/new-mission-form";
 import { BatteryMeter } from "@/components/fleet/battery-meter";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
-import { MISSION_STATE, ROBOT_STATUS, STATION_KIND } from "@/lib/status";
+import { MISSION_STATE, PACKAGE_STATE, ROBOT_ACTION, ROBOT_STATUS, STATION_KIND } from "@/lib/status";
 import { findRobot, findStation, robotUtilisation } from "@/lib/selectors";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +96,10 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
   const mission = robot.missionId ? snapshot.missions.find((m) => m.id === robot.missionId) : undefined;
   const destination = robot.destinationStationId ? findStation(snapshot, robot.destinationStationId) : undefined;
   const centerOn = useViewportStore((s) => s.centerOn);
+  const dispatch = useSimulationStore((s) => s.dispatch);
+  const pkg = robot.packageId ?? mission?.packageId;
+  const custody = pkg ? snapshot.packages.find((p) => p.id === pkg) : undefined;
+  const failed = robot.status === "failed";
 
   return (
     <>
@@ -101,7 +109,7 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
             <RobotChip id={robot.id} colorIndex={robot.colorIndex} className="text-sm" />
             <div className="mt-1 text-xs text-text-secondary">{robot.model} autonomous mobile robot</div>
           </div>
-          <StatusBadge tone={status.tone} pulse={robot.status === "moving"}>
+          <StatusBadge tone={status.tone} pulse={robot.status === "moving" || robot.status === "carrying"}>
             {status.label}
           </StatusBadge>
         </div>
@@ -109,7 +117,7 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
           <p
             className={cn(
               "mt-3 rounded-md border px-2.5 py-2 text-xs leading-snug",
-              robot.status === "fault"
+              robot.status === "failed"
                 ? "border-danger/30 bg-danger/[0.06] text-danger"
                 : robot.status === "waiting"
                   ? "border-amber/30 bg-amber/[0.06] text-amber"
@@ -119,15 +127,21 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
             {robot.activityNote}
           </p>
         ) : null}
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3 w-full border-line"
-          onClick={() => centerOn(robot.position.x, robot.position.y)}
-        >
-          <Crosshair />
-          Centre view on {robot.id}
-        </Button>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button variant="outline" size="sm" className="border-line" onClick={() => centerOn(robot.position.x, robot.position.y)}>
+            <Crosshair />
+            Centre view
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={failed}
+            onClick={() => dispatch({ type: "fail-robot", robotId: robot.id, reason: "Marked failed by operator" })}
+          >
+            <PowerOff />
+            {failed ? "Failed" : "Mark failed"}
+          </Button>
+        </div>
       </div>
 
       <Section title="Pose">
@@ -145,8 +159,9 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
         </dl>
       </Section>
 
-      <Section title="Mission">
+      <Section title="Task">
         <dl>
+          <Row label="Action" mono={false}>{ROBOT_ACTION[robot.action]}</Row>
           <Row label="Mission">{mission?.id ?? <Dash />}</Row>
           <Row label="State" mono={false}>
             {mission ? (
@@ -185,19 +200,40 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
               <Dash />
             )}
           </Row>
-          <Row label="Cells remaining">{robot.route.length || <Dash />}</Row>
+          <Row label="A* route">{robot.route.length ? `${robot.route.length} cells` : <Dash />}</Row>
+          <Row label="Blocked for">{robot.blockedTicks ? `${robot.blockedTicks} ticks` : <Dash />}</Row>
         </dl>
         <p className="mt-2 text-[11px] leading-snug text-text-dim">
-          Route is a scripted demo path, not planner output.
+          Spatial A* route. Robots wait for occupied cells and replan after a bounded wait; time-indexed reservations
+          arrive in Mission 004.
         </p>
       </Section>
 
-      <Section title="Telemetry" aside={<span className="font-mono text-[10px] text-amber/80">SAMPLE</span>}>
+      {custody ? (
+        <Section title="Package custody" aside={<span className="font-mono text-[10px] text-text-dim">{custody.id}</span>}>
+          <dl>
+            <Row label="State" mono={false}>
+              <StatusBadge tone={PACKAGE_STATE[custody.state].tone}>{PACKAGE_STATE[custody.state].label}</StatusBadge>
+            </Row>
+            <Row label="Holder">{custody.holderRobotId ?? <Dash />}</Row>
+          </dl>
+          <ol className="mt-2 flex flex-col gap-1 border-l border-line pl-3">
+            {custody.history.slice(-5).map((h, i) => (
+              <li key={`${h.tick}-${i}`} className="text-[11px] leading-snug text-text-secondary">
+                <span className="tabular mr-1.5 font-mono text-text-dim">{formatTick(h.tick)}</span>
+                {h.note}
+              </li>
+            ))}
+          </ol>
+        </Section>
+      ) : null}
+
+      <Section title="Telemetry" aside={<span className="font-mono text-[10px] text-text-dim">SIMPLIFIED</span>}>
         <dl>
           <Row label="Battery" mono={false}>
             <BatteryMeter value={robot.battery} />
           </Row>
-          <Row label="Speed">{robot.status === "moving" ? "1 cell / tick" : "0"}</Row>
+          <Row label="Speed">{robot.status === "moving" || robot.status === "carrying" ? "1 cell / tick" : "0"}</Row>
           <Row label="Distance travelled">{robot.stats.distance} cells</Row>
         </dl>
       </Section>
@@ -208,6 +244,7 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
           <Row label="Utilisation">{formatPercent(robotUtilisation(robot, snapshot.tick))}</Row>
           <Row label="Moving ticks">{robot.stats.movingTicks}</Row>
           <Row label="Waiting ticks">{robot.stats.waitingTicks}</Row>
+          <Row label="Replans">{robot.stats.replans}</Row>
         </dl>
       </Section>
     </>
@@ -267,6 +304,11 @@ function StationInspector({ station, snapshot }: { station: Station; snapshot: S
           </dl>
         </Section>
       ) : null}
+      {station.kind === "pickup" ? (
+        <Section title="Queue a mission from here">
+          <NewMissionForm key={station.id} defaultPickup={station.id} compact />
+        </Section>
+      ) : null}
     </>
   );
 }
@@ -276,7 +318,7 @@ function StationInspector({ station, snapshot }: { station: Station; snapshot: S
 const CELL_DESCRIPTION: Record<string, string> = {
   floor: "Open floor. Traversable.",
   lane: "Marked travel lane. Traversable.",
-  narrow: "One-cell passage. Only one robot can pass at a time; opposing traffic must yield.",
+  narrow: "One-cell passage. Only one robot can occupy each cell; opposing robots wait and the lower-ranked one replans after a bounded wait.",
   rack: "Storage rack. Not traversable.",
   obstacle: "Structural obstacle. Not traversable.",
   pickup: "Pickup station.",
@@ -290,6 +332,9 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
   const robot = snapshot.robots.find((r) => r.position.x === x && r.position.y === y);
   const planned = snapshot.robots.filter((r) => r.route.some((p) => p.x === x && p.y === y));
   const station = stationAt(snapshot.layout, point);
+  const dispatch = useSimulationStore((s) => s.dispatch);
+  const closure = snapshot.closures.find((c) => c.cells.some((p) => p.x === x && p.y === y));
+  const closable = kind !== null && isTraversable(snapshot.layout, point) && !station;
 
   return (
     <>
@@ -306,14 +351,32 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
           </div>
         </div>
         {kind ? <p className="mt-3 text-xs leading-snug text-text-secondary">{CELL_DESCRIPTION[kind]}</p> : null}
+        {closure ? (
+          <Button variant="outline" size="sm" className="mt-3 w-full border-line" onClick={() => dispatch({ type: "reopen-aisle", closureId: closure.id })}>
+            <LockOpen />
+            Reopen {closure.id}
+          </Button>
+        ) : closable ? (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="mt-3 w-full"
+            onClick={() => dispatch({ type: "close-aisle", cells: [point], label: `Cell ${cellRef(point)} closed by operator` })}
+          >
+            <Lock />
+            Close cell to traffic
+          </Button>
+        ) : null}
       </div>
       <Section title="Cell">
         <dl>
           <Row label="Kind" mono={false}>{kind}</Row>
-          <Row label="Traversable" mono={false}>{isTraversable(snapshot.layout, point) ? "Yes" : "No"}</Row>
+          <Row label="Traversable" mono={false}>
+            {closure ? <span className="text-danger">Closed · {closure.id}</span> : isTraversable(snapshot.layout, point) ? "Yes" : "No"}
+          </Row>
           <Row label="Station">{station?.id ?? <Dash />}</Row>
           <Row label="Occupied by">{robot?.id ?? <Dash />}</Row>
-          <Row label="On scripted route of">{planned.length ? planned.map((r) => r.id).join(", ") : <Dash />}</Row>
+          <Row label="On planned route of">{planned.length ? planned.map((r) => r.id).join(", ") : <Dash />}</Row>
         </dl>
       </Section>
     </>
@@ -372,10 +435,11 @@ function Legend() {
     { swatch: <span className="size-3 rounded-[2px] border border-[var(--swarm-rack-edge)] bg-[var(--swarm-rack)]" />, label: "Storage rack" },
     { swatch: <span className="size-3 rounded-[2px] border border-danger/50 bg-[var(--swarm-obstacle)]" />, label: "Obstacle" },
     { swatch: <span className="h-3 w-3 border-y border-amber/60 bg-amber/15" />, label: "Narrow passage" },
-    { swatch: <span className="h-0 w-3 border-t-2 border-dashed border-cyan/70" />, label: "Scripted route" },
+    { swatch: <span className="h-0 w-3 border-t-2 border-dashed border-cyan/70" />, label: "A* route" },
+    { swatch: <span className="size-3 rounded-[2px] border border-danger bg-danger/20" />, label: "Closed cell" },
     { swatch: <span className="size-2.5 rounded-[2px] bg-amber" />, label: "Carrying package" },
     { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Holding / waiting" },
-    { swatch: <span className="size-3 rounded-[3px] border-2 border-danger" />, label: "Fault" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-danger" />, label: "Failed" },
   ];
   return (
     <ul className="grid grid-cols-2 gap-x-3 gap-y-2">

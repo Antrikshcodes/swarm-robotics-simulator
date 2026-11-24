@@ -1,16 +1,18 @@
-export { DemoPlayback, computeMetrics, LOW_BATTERY_THRESHOLD } from "./demo-playback";
-export type { SimulationSource } from "./demo-playback";
-export {
-  SCENARIOS,
-  DEFAULT_SCENARIO_ID,
-  getScenario,
-  getCompiledScenario,
-} from "./scenarios";
-export { cellKindAt, isTraversable, stationAt, samePoint } from "./layout";
+export { WarehouseEngine } from "./warehouse-engine";
+export type { SimulationSource, EngineOptions } from "./warehouse-engine";
+export type { EngineCommand, CommandResult, CommandOutcome, LoggedCommand, WorldCommand } from "./commands";
+export type { EngineError, EngineErrorCode, Result } from "./core/result";
+export { InvariantViolation } from "./core/result";
+export { computeMetrics, LOW_BATTERY_THRESHOLD, BLOCKED_ALERT_TICKS } from "./metrics";
+export { checkInvariants } from "./invariants";
+export { findPath } from "./pathfinding/astar";
+export { isActiveMission } from "./missions/mission-lifecycle";
+export { SCENARIOS, DEFAULT_SCENARIO_ID, getScenario, getCompiledScenario } from "./scenarios";
+export { cellKindAt, isTraversable, stationAt, samePoint, pointKey } from "./world/layout";
 
-import { DemoPlayback } from "./demo-playback";
+import { WarehouseEngine, type EngineOptions } from "./warehouse-engine";
 import { getCompiledScenario } from "./scenarios";
 
-export function createSimulationSource(scenarioId: string): DemoPlayback {
-  return new DemoPlayback(getCompiledScenario(scenarioId));
+export function createSimulationSource(scenarioId: string, options?: EngineOptions): WarehouseEngine {
+  return new WarehouseEngine(getCompiledScenario(scenarioId), options);
 }

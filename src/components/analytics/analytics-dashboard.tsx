@@ -160,8 +160,9 @@ export function AnalyticsDashboard() {
 
       <PlannedNote mission="Mission 007">
         <BarChart3 className="mr-1 inline size-3.5 align-[-2px]" />
-        Congestion (cell-occupancy heat and blocked-wait time), mission wait time from a real scheduler, and run
-        comparison across scenarios will be derived from engine events once the coordinator exists.
+        Derived congestion measures (per-cell occupancy heat from the movement log, blocked-wait time per aisle),
+        queue wait time per mission and cross-scenario comparison are planned. Waiting ticks above come from the
+        engine&apos;s occupancy guard: a robot waits when its next cell is held by another robot.
       </PlannedNote>
     </PageContainer>
   );

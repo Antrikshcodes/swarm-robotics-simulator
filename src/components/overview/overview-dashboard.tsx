@@ -9,6 +9,7 @@ import {
   Bot,
   CheckCircle2,
   Clock,
+  Construction,
   Hourglass,
   ListTodo,
   OctagonAlert,
@@ -49,7 +50,7 @@ export function OverviewDashboard() {
           <>
             <Button variant="outline" size="sm" onClick={togglePlayback} className="border-line">
               {status === "running" ? <Pause /> : <Play />}
-              {status === "running" ? "Pause" : status === "ready" ? "Start demo" : "Resume"}
+              {status === "running" ? "Pause" : status === "ready" ? "Start simulation" : "Resume"}
             </Button>
             <Button asChild size="sm">
               <Link href="/simulation">
@@ -81,7 +82,7 @@ export function OverviewDashboard() {
           <PanelHeader title="Missions" icon={<Route />} description="Pickup → drop-off jobs" />
           <PanelBody className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
             <Stat label="Active" value={m.activeMissions} tone="cyan" icon={<Activity />} hint="To pickup or carrying" />
-            <Stat label="Pending" value={m.queuedMissions} icon={<ListTodo />} hint="No scheduler yet" />
+            <Stat label="Pending" value={m.queuedMissions} icon={<ListTodo />} hint="Waiting for a robot" />
             <Stat label="Delivered" value={m.completedDeliveries} tone="lime" icon={<CheckCircle2 />} hint="Since tick 0" />
             <Stat label="Waiting" value={m.waitingMissions} tone={m.waitingMissions ? "amber" : undefined} icon={<Hourglass />} hint="Robot on hold" />
           </PanelBody>
@@ -142,10 +143,12 @@ export function OverviewDashboard() {
                       incident.severity === "critical" ? "bg-danger/12 text-danger" : "bg-amber/12 text-amber",
                     )}
                   >
-                    {incident.kind === "robot-fault" ? (
+                    {incident.kind === "robot-failed" ? (
                       <OctagonAlert />
                     ) : incident.kind === "low-battery" ? (
                       <BatteryWarning />
+                    ) : incident.kind === "aisle-closure" ? (
+                      <Construction />
                     ) : (
                       <Hourglass />
                     )}

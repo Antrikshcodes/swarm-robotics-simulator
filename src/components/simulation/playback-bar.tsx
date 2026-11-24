@@ -109,7 +109,7 @@ function Timeline() {
   const markers = useMemo(() => {
     const warn = events
       .filter((e) => e.severity === "warning" || e.severity === "critical")
-      .map((e) => ({ tick: e.tick, tone: SEVERITY[e.severity].tone, key: `e${e.seq}` }));
+      .map((e) => ({ tick: e.tick, tone: SEVERITY[e.severity].tone, key: e.id }));
     const delivered = deliveryTicks.map((t, i) => ({ tick: t, tone: "lime" as const, key: `d${i}` }));
     return [...delivered, ...warn];
   }, [events, deliveryTicks]);
@@ -173,7 +173,7 @@ function EventStrip() {
           <li className="text-xs text-text-dim">No events yet.</li>
         ) : (
           recent.map((event) => (
-            <li key={event.seq} className="shrink-0">
+            <li key={event.id} className="shrink-0">
               <button
                 type="button"
                 title={`Jump to ${formatTick(event.tick)}${event.robotId ? ` and select ${event.robotId}` : ""}`}

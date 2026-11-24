@@ -105,7 +105,7 @@ export function SettingsPanel() {
           <PanelHeader title="Warehouse display" description="Canvas overlays in Simulation Studio" />
           <ToggleRow pref="showGrid" label="Grid lines" description="Cell grid with a stronger line every 5 cells." />
           <ToggleRow pref="showCoordinates" label="Coordinate rulers" description="Column letters and row numbers on the canvas edges." />
-          <ToggleRow pref="showRoutes" label="Routes" description="Each robot's remaining scripted path and destination." />
+          <ToggleRow pref="showRoutes" label="Routes" description="Each robot's remaining A* route and destination." />
           <ToggleRow pref="showLabels" label="Robot labels" description="Robot IDs beneath markers when zoomed in enough." />
         </Panel>
 
@@ -129,8 +129,8 @@ export function SettingsPanel() {
         </Panel>
       </div>
 
-      <PlannedNote mission="Missions 002–007">
-        Engine configuration (random seed, planner and reservation horizon, deadlock timeout, recovery policy) and
+      <PlannedNote mission="Missions 003–007">
+        Engine configuration (scenario seed, reservation horizon, replanning thresholds, deadlock timeout, recovery policy) and
         backend connection settings will appear here once those systems exist. Nothing here is a placeholder control.
       </PlannedNote>
     </PageContainer>

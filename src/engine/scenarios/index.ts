@@ -21,7 +21,7 @@ export function getScenario(id: string): ScenarioDefinition {
   return found;
 }
 
-/** Compile once and cache — layouts and expanded programs are immutable. */
+/** Compile once and cache — compiled scenarios are immutable. */
 export function getCompiledScenario(id: string): CompiledScenario {
   let entry = compiled.get(id);
   if (!entry) {

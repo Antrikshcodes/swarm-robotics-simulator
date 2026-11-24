@@ -1,10 +1,8 @@
-import type { ScenarioDefinition } from "../scenario";
-import { dockLoop } from "./programs";
-
-const WIDTH = 28;
+import type { MissionSpec, ScenarioDefinition } from "../scenario";
 
 // 28 × 18. Two rack blocks split by a central cross aisle; inbound pick
-// faces on the west wall, outbound docks on the east wall.
+// faces on the west wall, outbound docks on the east wall, parking and
+// charging along the south wall.
 const MAP = [
   ".--------------------------.",
   ".-#####-#####--#####-#####-.",
@@ -26,39 +24,30 @@ const MAP = [
   "..C.C.C.....................",
 ];
 
-const r1 = dockLoop({ width: WIDTH, stationRow: 3, returnRow: 0, pickup: "PK-01", dropoff: "DO-01", load: 4, unload: 4 });
-const r2 = dockLoop({ width: WIDTH, stationRow: 9, returnRow: 6, pickup: "PK-02", dropoff: "DO-02", load: 5, unload: 3 });
-const r3 = dockLoop({ width: WIDTH, stationRow: 15, returnRow: 12, pickup: "PK-03", dropoff: "DO-03", load: 3, unload: 5 });
+const PICKUPS = ["PK-01", "PK-02", "PK-03"];
+const DROPOFFS = ["DO-01", "DO-02", "DO-03"];
+const ALL_ROUTES: MissionSpec[] = PICKUPS.flatMap((pickup) => DROPOFFS.map((dropoff) => ({ pickup, dropoff })));
 
 export const standardScenario: ScenarioDefinition = {
   id: "standard",
   name: "Standard warehouse",
-  summary: "Baseline layout · 5 robots · 3 dock-to-dock lanes",
+  summary: "Baseline layout · 5 robots · A*-routed deliveries",
   focus:
-    "Concurrent deliveries on independent lanes. Each robot owns a dedicated aisle pair, so no coordination decisions are required.",
+    "Missions are queued by a seeded feed and assigned to the nearest available robot. Routes are planned with A*; robots wait for occupied cells and replan around persistent blockers.",
+  seed: 1001,
   map: MAP,
   robots: [
-    { id: "R-01", model: "AMR-200", colorIndex: 1, heading: "E", battery: 92, ...r1 },
-    { id: "R-02", model: "AMR-200", colorIndex: 2, heading: "E", battery: 78, startDelay: 6, ...r2 },
-    { id: "R-03", model: "AMR-200", colorIndex: 3, heading: "E", battery: 64, startDelay: 12, ...r3 },
-    {
-      id: "R-04",
-      model: "AMR-200",
-      colorIndex: 4,
-      heading: "N",
-      battery: 41,
-      start: { x: 2, y: 17 },
-      program: [{ op: "charge", station: "CH-01", ticks: 60 }],
-    },
-    {
-      id: "R-05",
-      model: "AMR-120",
-      colorIndex: 5,
-      heading: "N",
-      battery: 88,
-      start: { x: 4, y: 17 },
-      program: [],
-    },
+    { id: "R-01", model: "AMR-200", colorIndex: 1, heading: "N", battery: 92, home: { x: 9, y: 17 } },
+    { id: "R-02", model: "AMR-200", colorIndex: 2, heading: "N", battery: 78, home: { x: 11, y: 17 } },
+    { id: "R-03", model: "AMR-200", colorIndex: 3, heading: "N", battery: 64, home: { x: 13, y: 17 } },
+    { id: "R-04", model: "AMR-200", colorIndex: 4, heading: "N", battery: 41, home: { x: 2, y: 17 } },
+    { id: "R-05", model: "AMR-120", colorIndex: 5, heading: "N", battery: 88, home: { x: 4, y: 17 } },
   ],
-  backlog: [{ pickup: "PK-02", dropoff: "DO-03" }],
+  missions: [
+    { pickup: "PK-01", dropoff: "DO-01" },
+    { pickup: "PK-02", dropoff: "DO-02" },
+    { pickup: "PK-03", dropoff: "DO-03" },
+  ],
+  feed: { intervalTicks: 10, maxOpen: 5, routes: ALL_ROUTES },
+  handling: { loadTicks: 3, unloadTicks: 3 },
 };

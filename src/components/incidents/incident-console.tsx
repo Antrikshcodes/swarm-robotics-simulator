@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BatteryWarning, Crosshair, History, Hourglass, OctagonAlert } from "lucide-react";
+import { BatteryWarning, Construction, Crosshair, History, Hourglass, LockOpen, OctagonAlert } from "lucide-react";
 import { PageContainer, PageIntro } from "@/components/layout/page-container";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
@@ -20,25 +20,33 @@ import { cn } from "@/lib/utils";
 type Filter = "open" | "resolved" | "all";
 
 const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; planned: string; mission: string }> = {
-  "robot-fault": {
-    label: "Robot fault",
+  "robot-failed": {
+    label: "Robot failure",
     icon: OctagonAlert,
     mission: "Mission 006",
     planned:
-      "The recovery manager will mark the robot unavailable, move the stranded package into an explicit recovery custody state, and reassign the mission without losing delivery history.",
+      "Today the engine halts the robot, keeps package custody with it and marks the mission recovery-required. The recovery manager will transfer custody explicitly and reassign the mission without losing delivery history.",
   },
-  "conflict-hold": {
-    label: "Conflict hold",
+  "robot-blocked": {
+    label: "Blocked robot",
     icon: Hourglass,
     mission: "Missions 004–005",
     planned:
-      "Today this hold is scripted. The reservation coordinator will decide yields from time-indexed cell and edge reservations, and the deadlock manager will tell congestion apart from true deadlock.",
+      "Today robots wait behind occupied cells and replan around other robots after a bounded, rank-staggered wait. Time-indexed reservations will prevent most of these conflicts, and the deadlock manager will tell congestion apart from true deadlock.",
   },
   "low-battery": {
     label: "Low battery",
     icon: BatteryWarning,
     mission: "Later mission",
-    planned: "Battery values are sample telemetry. Charging-aware scheduling is not in the current roadmap scope.",
+    planned:
+      "The battery model is simplified: fixed drain per move, robots below 25% seek a free charger, robots below 15% are not assigned. Charging-aware scheduling is not in the current roadmap scope.",
+  },
+  "aisle-closure": {
+    label: "Aisle closure",
+    icon: Construction,
+    mission: "Mission 006",
+    planned:
+      "Closed cells are excluded from new A* routes and affected robots replan on their next tick. Robots already on a closed cell may leave it. Richer closure tooling (multi-cell selection, scheduled reopen) comes later.",
   },
 };
 
@@ -54,10 +62,13 @@ export function IncidentConsole() {
   const open = all.filter((i) => i.open);
 
   const locate = (incident: Incident) => {
-    const robot = snapshot.robots.find((r) => r.id === incident.robotId);
     const sim = useSimulationStore.getState();
-    sim.select({ kind: "robot", id: incident.robotId });
-    if (robot) useViewportStore.getState().centerOn(robot.position.x, robot.position.y);
+    const robot = snapshot.robots.find((r) => r.id === incident.robotId);
+    const closure = snapshot.closures.find((c) => c.id === incident.closureId);
+    const focus = robot?.position ?? closure?.cells[0];
+    if (robot) sim.select({ kind: "robot", id: robot.id });
+    else if (closure) sim.select({ kind: "cell", x: closure.cells[0].x, y: closure.cells[0].y });
+    if (focus) useViewportStore.getState().centerOn(focus.x, focus.y);
     router.push("/simulation");
   };
 
@@ -65,8 +76,12 @@ export function IncidentConsole() {
     const sim = useSimulationStore.getState();
     sim.pause();
     sim.seek(incident.openedTick);
-    sim.select({ kind: "robot", id: incident.robotId });
+    if (incident.robotId) sim.select({ kind: "robot", id: incident.robotId });
     router.push("/simulation");
+  };
+
+  const reopen = (incident: Incident) => {
+    if (incident.closureId) useSimulationStore.getState().dispatch({ type: "reopen-aisle", closureId: incident.closureId });
   };
 
   return (
@@ -86,7 +101,7 @@ export function IncidentConsole() {
           <Stat label="Open warnings" value={open.filter((i) => i.severity === "warning").length} tone={open.some((i) => i.severity === "warning") ? "amber" : undefined} />
         </Panel>
         <Panel className="p-4">
-          <Stat label="Conflict holds" value={all.filter((i) => i.kind === "conflict-hold").length} hint="In retained event history" />
+          <Stat label="Blocked episodes" value={all.filter((i) => i.kind === "robot-blocked").length} hint="Open + retained history" />
         </Panel>
         <Panel className="p-4">
           <Stat label="Resolved" value={all.filter((i) => !i.open).length} />
@@ -166,7 +181,7 @@ export function IncidentConsole() {
         <Panel className="flex flex-col">
           <PanelHeader title="Details" />
           {selected ? (
-            <IncidentDetail incident={selected} tick={snapshot.tick} onLocate={locate} onReplay={replay} />
+            <IncidentDetail incident={selected} tick={snapshot.tick} onLocate={locate} onReplay={replay} onReopen={reopen} />
           ) : (
             <p className="px-4 py-12 text-center text-sm text-text-secondary">Select an incident to see details.</p>
           )}
@@ -181,18 +196,21 @@ function IncidentDetail({
   tick,
   onLocate,
   onReplay,
+  onReopen,
 }: {
   incident: Incident;
   tick: number;
   onLocate: (i: Incident) => void;
   onReplay: (i: Incident) => void;
+  onReopen: (i: Incident) => void;
 }) {
   const meta = KIND[incident.kind];
   const rows: [string, string][] = [
     ["Incident", incident.id],
     ["Type", meta.label],
-    ["Robot", incident.robotId],
+    ["Robot", incident.robotId ?? "—"],
     ["Mission", incident.missionId ?? "—"],
+    ["Closure", incident.closureId ?? "—"],
     ["Opened", formatTick(incident.openedTick)],
     ["Duration", incident.open ? `${tick - incident.openedTick} ticks (ongoing)` : "Resolved"],
   ];
@@ -216,8 +234,14 @@ function IncidentDetail({
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" className="border-line" onClick={() => onLocate(incident)}>
           <Crosshair />
-          Locate {incident.robotId}
+          Locate {incident.robotId ?? incident.closureId}
         </Button>
+        {incident.kind === "aisle-closure" && incident.open ? (
+          <Button size="sm" variant="outline" className="border-line" onClick={() => onReopen(incident)}>
+            <LockOpen />
+            Reopen {incident.closureId}
+          </Button>
+        ) : null}
         <Button size="sm" variant="outline" className="border-line" onClick={() => onReplay(incident)}>
           <History />
           Replay from {formatTick(incident.openedTick)}

@@ -158,16 +158,16 @@ function SystemStatus({ labelClass }: { labelClass: string }) {
       <ul className="flex flex-col gap-1.5 px-2 text-xs">
         <StatusRow
           tone={status === "running" ? "lime" : "cyan"}
-          label="Demo playback"
+          label="Simulation engine"
           value={status === "running" ? "Live" : "Local"}
-          title={`Deterministic scripted playback · tick ${tick}`}
+          title={`Deterministic in-browser engine · tick ${tick}`}
           labelClass={labelClass}
         />
         <StatusRow
           tone="neutral"
-          label="Coordination engine"
+          label="Reservations"
           value="Planned"
-          title="Planner, reservations and recovery arrive in Missions 002–006"
+          title="Time-indexed reservations, deadlock handling and recovery arrive in Missions 004–006"
           labelClass={labelClass}
         />
         <StatusRow

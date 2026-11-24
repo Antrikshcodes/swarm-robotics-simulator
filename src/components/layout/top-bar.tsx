@@ -73,7 +73,7 @@ function PlaybackIndicator() {
         </Link>
       </TooltipTrigger>
       <TooltipContent>
-        Demo playback · {getScenario(scenarioId).name} · open Simulation Studio
+        Simulation engine · {getScenario(scenarioId).name} · open Simulation Studio
       </TooltipContent>
     </Tooltip>
   );
@@ -89,7 +89,8 @@ function EventsMenu() {
     () => events.filter((e) => e.severity === "warning" || e.severity === "critical").slice(-8).reverse(),
     [events],
   );
-  const latestSeq = events.length ? events[events.length - 1].seq : 0;
+  // Alerts are engine events only (E- ids), so their seq is one ordered space.
+  const latestSeq = notable.length ? notable[0].seq : 0;
   const seenSeq = seen.scenarioId === scenarioId && seen.seq <= latestSeq ? seen.seq : 0;
   const unread = notable.filter((e) => e.seq > seenSeq).length;
   const hasCritical = notable.some((e) => e.seq > seenSeq && e.severity === "critical");
@@ -128,7 +129,7 @@ function EventsMenu() {
       <DropdownMenuContent align="end" className="w-80 p-0">
         <DropdownMenuLabel className="flex items-center justify-between border-b border-line px-3 py-2">
           <span className="text-xs font-medium text-foreground">Recent alerts</span>
-          <span className="font-mono text-[10px] text-text-dim">demo script</span>
+          <span className="font-mono text-[10px] text-text-dim">engine events</span>
         </DropdownMenuLabel>
         <div className="scrollbar-thin max-h-80 overflow-y-auto p-1">
           {notable.length === 0 ? (
@@ -137,7 +138,7 @@ function EventsMenu() {
             </p>
           ) : (
             notable.map((event) => (
-              <DropdownMenuItem key={event.seq} asChild className="items-start gap-2.5 py-2">
+              <DropdownMenuItem key={event.id} asChild className="items-start gap-2.5 py-2">
                 <Link href="/incidents">
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", event.severity === "critical" ? "bg-danger" : "bg-amber")} />
                   <span className="min-w-0 flex-1">

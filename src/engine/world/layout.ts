@@ -4,7 +4,7 @@ import type {
   Station,
   StationKind,
   WarehouseLayout,
-} from "../types/simulation";
+} from "../../types/simulation";
 
 /**
  * Warehouse maps are authored as ASCII so scenarios stay readable and
@@ -103,4 +103,29 @@ export function stationAt(layout: WarehouseLayout, p: GridPoint): Station | unde
 
 export function samePoint(a: GridPoint, b: GridPoint): boolean {
   return a.x === b.x && a.y === b.y;
+}
+
+/** Stable string key for a grid point (used for sets and maps). */
+export const pointKey = (p: GridPoint): string => `${p.x},${p.y}`;
+
+export function isStationKind(kind: CellKind): boolean {
+  return kind === "pickup" || kind === "dropoff" || kind === "charger";
+}
+
+/** Four-connected neighbours in a fixed order (N, E, S, W) for determinism. */
+export function neighbours(p: GridPoint): GridPoint[] {
+  return [
+    { x: p.x, y: p.y - 1 },
+    { x: p.x + 1, y: p.y },
+    { x: p.x, y: p.y + 1 },
+    { x: p.x - 1, y: p.y },
+  ];
+}
+
+export const manhattan = (a: GridPoint, b: GridPoint): number => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+export function isValidPoint(p: unknown): p is GridPoint {
+  if (typeof p !== "object" || p === null) return false;
+  const { x, y } = p as Record<string, unknown>;
+  return Number.isInteger(x) && Number.isInteger(y);
 }
