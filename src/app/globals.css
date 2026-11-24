@@ -4,12 +4,104 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * SWARM design tokens — the single source of truth for colour.
+ * Canvas rendering reads these same custom properties at runtime
+ * (see src/lib/canvas-theme.ts), so never duplicate hex values in TS.
+ */
+:root {
+  /* Core palette (DESIGN_SYSTEM.md) */
+  --swarm-bg: #090d10;
+  --swarm-sidebar: #11191e;
+  --swarm-surface: #19242a;
+  --swarm-surface-raised: #1f2c33;
+  --swarm-surface-sunken: #0d1317;
+  --swarm-line: #213039;
+  --swarm-line-strong: #2d3e48;
+  --swarm-text: #e3e9ec;
+  --swarm-text-secondary: #82919a;
+  --swarm-text-dim: #55646d;
+
+  --swarm-lime: #b7f34a;
+  --swarm-cyan: #40c8e8;
+  --swarm-amber: #f5b942;
+  --swarm-red: #f06464;
+
+  /* Warehouse floor (canvas) */
+  --swarm-floor: #0e1519;
+  --swarm-floor-lane: #111a1f;
+  --swarm-grid: #1a262d;
+  --swarm-rack: #24343d;
+  --swarm-rack-edge: #33474f;
+  --swarm-obstacle: #2a2326;
+  --swarm-narrow: #f5b94226;
+
+  /* Robot identity colours — deliberately avoid the semantic
+     lime / amber / red signals so status is never ambiguous. */
+  --robot-1: #40c8e8;
+  --robot-2: #a68cff;
+  --robot-3: #3dd6b0;
+  --robot-4: #6ea8ff;
+  --robot-5: #f27fc4;
+  --robot-6: #d9c79e;
+  --robot-7: #8be0f0;
+  --robot-8: #c792ea;
+
+  /* shadcn/ui semantic mapping (dark-only product) */
+  --background: var(--swarm-bg);
+  --foreground: var(--swarm-text);
+  --card: var(--swarm-surface);
+  --card-foreground: var(--swarm-text);
+  --popover: #141d22;
+  --popover-foreground: var(--swarm-text);
+  --primary: var(--swarm-lime);
+  --primary-foreground: #0b1206;
+  --secondary: var(--swarm-surface-raised);
+  --secondary-foreground: var(--swarm-text);
+  --muted: #162026;
+  --muted-foreground: var(--swarm-text-secondary);
+  --accent: #22313a;
+  --accent-foreground: var(--swarm-text);
+  --destructive: var(--swarm-red);
+  --border: var(--swarm-line);
+  --input: var(--swarm-line-strong);
+  --ring: #b7f34a99;
+  --chart-1: var(--swarm-lime);
+  --chart-2: var(--swarm-cyan);
+  --chart-3: var(--swarm-amber);
+  --chart-4: var(--swarm-red);
+  --chart-5: var(--swarm-text-secondary);
+  --radius: 0.375rem;
+  --sidebar: var(--swarm-sidebar);
+  --sidebar-foreground: var(--swarm-text);
+  --sidebar-primary: var(--swarm-lime);
+  --sidebar-primary-foreground: #0b1206;
+  --sidebar-accent: #1a252b;
+  --sidebar-accent-foreground: var(--swarm-text);
+  --sidebar-border: var(--swarm-line);
+  --sidebar-ring: #b7f34a99;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-geist-sans);
+
+  /* SWARM utilities: bg-surface, text-lime, border-line, … */
+  --color-surface: var(--swarm-surface);
+  --color-surface-raised: var(--swarm-surface-raised);
+  --color-surface-sunken: var(--swarm-surface-sunken);
+  --color-line: var(--swarm-line);
+  --color-line-strong: var(--swarm-line-strong);
+  --color-text-secondary: var(--swarm-text-secondary);
+  --color-text-dim: var(--swarm-text-dim);
+  --color-lime: var(--swarm-lime);
+  --color-cyan: var(--swarm-cyan);
+  --color-amber: var(--swarm-amber);
+  --color-danger: var(--swarm-red);
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,86 +140,54 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
-  button:not(:disabled), [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
   html {
     @apply font-sans;
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv11";
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--swarm-lime) 30%, transparent);
+  }
+}
+
+@layer utilities {
+  /* Tabular figures for any numeric readout. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Compact uppercase technical label. */
+  .label-caps {
+    font-size: 10.5px;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--swarm-text-secondary);
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--swarm-line-strong) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
