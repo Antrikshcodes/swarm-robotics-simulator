@@ -2,6 +2,19 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-24 — Mission 006 analytics and Demo Mode
+
+### Added
+- `/demo` judge-facing scenario launcher for standard operations, narrow-aisle coordination, deadlock recovery, carrying robot failure, dynamic aisle closure, and high-density stress. Controls use the shared simulation engine and show live canvas state, metrics, and events.
+- Analytics filters for time range, robot, and mission status; fleet summaries, throughput, mission cycle time, movement-density cells, recovery measures, event timeline, and robot comparison.
+- `src/lib/analytics.ts` snapshot derivations and unit tests.
+- `MISSION_006_AUDIT.md` documenting branch state, mission verification, baseline checks, and constraints.
+
+### Limits
+- Cross-scenario history is not archived; analytics scope is the current loaded run.
+- Event and movement measures use bounded engine histories (300 events and 400 moves). Fleet waiting and utilization counters are cumulative.
+- The mission model has `cancelled` but no distinct `failed` terminal state.
+
 ## 2026-11-24 — Mission 005: robot failure recovery and dynamic aisle replanning (`feat/mission-001-frontend`)
 
 ### Added

@@ -134,3 +134,9 @@ Spatial pathfinding returns its own explicit result: `{ ok: true, path, cost, ex
 ## Future HTTP/WebSocket boundary
 
 If a backend is introduced, keep HTTP for durable configuration and queries, and WebSockets (or another explicit streaming contract) for live snapshots/events. A remote engine should implement `SimulationSource` and stream the same snapshot shape. Do not duplicate authoritative planning logic in the browser and backend.
+
+## Mission 006 analytics consumption
+
+The analytics UI reads existing `SimulationSnapshot` fields and adds no mutable engine API. Time-filtered delivery throughput uses `deliveryTicks`; mission cycle time and state use lifecycle timestamps; utilization, waiting, distance, deadlock and recovery totals use cumulative snapshot counters. Movement-density cells derive from `movements`; the event timeline derives from `events`.
+
+The mission model has no distinct `failed` state; analytics reports cancelled missions as failed/cancelled and keeps `recovery-required` work active. Scenario scope is the current run because the snapshot contract has no archived cross-run dataset. Operational events and movements are bounded; consumers must label these as retained-history measures.

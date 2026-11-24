@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BarChart3,
   Bot,
+  Clapperboard,
   LayoutDashboard,
   Route,
   Settings,
@@ -10,7 +11,7 @@ import {
 } from "lucide-react";
 
 export interface NavItem {
-  readonly href: "/" | "/simulation" | "/fleet" | "/missions" | "/incidents" | "/analytics" | "/settings";
+  readonly href: "/" | "/simulation" | "/demo" | "/fleet" | "/missions" | "/incidents" | "/analytics" | "/settings";
   readonly label: string;
   readonly section: "Operate" | "Monitor" | "System";
   readonly description: string;
@@ -38,6 +39,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: Activity,
     shortcut: "2",
     // The studio toolbar carries its own scenario selector.
+    scenarioScoped: false,
+  },
+  {
+    href: "/demo",
+    label: "Demo Mode",
+    section: "Operate",
+    description: "Reproducible judge scenarios and live operations",
+    icon: Clapperboard,
+    shortcut: "D",
     scenarioScoped: false,
   },
   {
@@ -71,7 +81,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/analytics",
     label: "Analytics",
     section: "Monitor",
-    description: "Throughput, cycle time and utilisation",
+    description: "Fleet performance, delivery trends and recovery analytics",
     icon: BarChart3,
     shortcut: "6",
     scenarioScoped: true,

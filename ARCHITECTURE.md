@@ -175,3 +175,11 @@ Scaling (`npm run bench`): synthetic 40 × 27 warehouse, 8 docks, heavy feed (a 
 Cost grows roughly linearly with fleet size up to 32 robots on this map because only robots that need a plan are replanned (≈ 0.08 plans per robot per tick). These numbers are from one machine and one synthetic layout; larger maps, longer horizons or much denser traffic have not been measured. Max-tick outliers (≈ 5–7 ms) come from ticks where several robots replan at once.
 
 Trade-offs: seek replays from tick 0 (no checkpoints); snapshots copy reservation lists (≈ robots × horizon entries) once per change; events (300), decisions (120) and movements (400) are ring-buffered.
+
+## Mission 006 analytics and demo surface
+
+The `/analytics` dashboard is a read-only projection of `SimulationSnapshot`. `src/lib/analytics.ts` applies the selected tick window, robot, and mission-state filters; it derives delivery buckets from engine delivery ticks, mission duration from lifecycle timestamps, and movement density from recorded moves. Fleet counters such as utilization, waiting ticks, distance, failures, deadlocks, and handovers come from cumulative robot/recovery/deadlock state.
+
+`/demo` loads existing `ScenarioDefinition` instances through the same `simulation-store` commands as the Simulation Studio. Scenario choices are seeded engine inputs. The presentation layer does not animate movement or recovery separately.
+
+The engine retains at most 300 operational events and 400 movement records, while mission completion timestamps and delivery ticks remain available for the run. Event-derived recovery/congestion details and movement-density cells therefore report only retained data. The app does not yet retain analytics across scenario resets or compare multiple saved runs.

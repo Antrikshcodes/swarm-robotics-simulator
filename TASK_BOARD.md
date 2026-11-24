@@ -154,3 +154,27 @@ Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPME
 - Record verification commands and outcomes in the PR or commit summary.
 - Keep one active coding agent per shared working tree.
 - Codex reviews Claude's implementation and reports actionable findings before making broad refactors.
+
+## Current milestone: Mission 006 — Analytics and hackathon readiness
+
+Branch: `feat/mission-001-frontend`. Mission 006 is in **Review**; cross-scenario analytics, complete E2E coverage, and responsive viewport verification remain open.
+
+| ID | Task | Status | Owner |
+|---|---|---|---|
+| M6-01 | Audit branch, history, docs, Mission 001–005 source and baseline tests | Done | Codex |
+| M6-02 | Analytics time, robot, and mission-state filters with fleet/per-robot summaries | Review | Codex |
+| M6-03 | Throughput, movement-density view, recovery counts, and operations timeline | Review | Codex |
+| M6-04 | Judge Demo Mode for six existing deterministic engine scenarios | Review | Codex |
+| M6-05 | Documentation updates and demo instructions | Review | Codex |
+| M6-06 | Unit/integration checks, typecheck, lint, build, and 4–32 robot benchmark | Done | Codex |
+| M6-07 | Cross-scenario archived analytics and scenario filter | Todo | Future |
+| M6-08 | Full browser E2E coverage and responsive viewport verification | Todo | Future |
+
+### M6-06 verification record
+
+- `npm test` — 196 tests pass across 15 files.
+- `npm run lint` — passes with no warnings.
+- `npm run typecheck` — passes.
+- `npm run build -- --webpack` — passes; eight routes prerendered. The default Turbopack build hit a sandbox process/port permission error.
+- `npm run bench` — 4–32 robots, 600 ticks, 0 commit-time collision rejections; mean tick time 0.17–1.22 ms on this machine.
+- Browser inspection confirmed `/demo` and `/analytics` render and expose their controls. Responsive breakpoint testing and all existing route interactions remain unverified.

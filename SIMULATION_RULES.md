@@ -222,4 +222,10 @@ Metrics are derived from engine state/events (`engine/metrics.ts`, `lib/selector
 - Utilisation — busy robot-ticks (moving, loading, unloading) ÷ elapsed robot-ticks.
 - Open incidents — failed robots + robots blocked ≥ 3 ticks + low-battery robots + active closures.
 - Coordination — plans computed, nodes expanded, planned waits, right-of-way decisions, commit-time rejections (`snapshot.coordination.stats`).
-- Congestion (cell-occupancy heat, blocked-wait per aisle) — **Planned (later mission)**.
+- Congestion visualization — **Implemented in Mission 006 as movement density over the retained 400-move log**. It counts destination-cell visits; it does not measure dwell or blocked-wait duration per aisle. `robot-waiting` and `conflict-prevented` counts use the retained 300-event log.
+
+### Mission 006 analytics and demonstration
+
+`/analytics` derives time-windowed delivery and mission measures from run histories, and presents per-robot cumulative utilization, wait, distance, and deliveries. It includes mission-status and robot filters, a movement-density view, retained event timeline, and deadlock/recovery counts. Cancelled is the current unsuccessful terminal mission state; `recovery-required` remains active. No separate failed mission state exists.
+
+`/demo` runs six existing deterministic scenarios using the same engine and global simulation store as the Studio. It provides one-click load/run, pause/resume, reset, speed, live metrics, warehouse rendering, event timeline, and terminal completion state when all extant missions are completed or cancelled. Scenario snapshots are not archived across scenario changes, so analytics are scoped to the current run.

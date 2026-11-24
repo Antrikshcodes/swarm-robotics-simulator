@@ -13,7 +13,7 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 
 - [x] Inspect existing repository and preserve all files.
 - [x] Scaffold Next.js App Router with TypeScript and Tailwind.
-- [x] Configure design tokens, Geist fonts, and shared UI primitives.
+- [x] Configure design tokens, local system font stacks, and shared UI primitives.
 - [x] Build application shell: sidebar, top bar, status indicators.
 - [x] Build Overview page foundation.
 - [x] Build Simulation Studio layout foundation. *Delivered beyond the original "grid rendering only" scope: full Canvas warehouse, interactions and playback, driven by a deterministic scripted demo.*
@@ -83,13 +83,17 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 - [x] Tests: every failure type, movement/assignment prevention, mission and custody preservation, atomic transfer, duplicate-custody prevention, selection, timeout, rescuer failure, closure, reopening, occupied cell, invalidation, reservation release, replanning, deadlock integration, determinism, 3 000-tick stress run.
 - [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 006 — Metrics, polish, and judging scenarios (not started)
+## Mission 006 — Metrics, polish, and judging scenarios (in progress)
 
-- [x] Completed jobs, waiting time and utilisation from engine state/events *(Missions 002–003)*; [ ] congestion measure (cell-occupancy heat, blocked-wait per aisle).
-- [ ] Scenario controls for all required demonstrations with one-click setup *(lab scenarios for deadlocks and failure recovery exist since Missions 004–005)*.
+- [x] Completed jobs, waiting time and utilisation from engine state/events *(Missions 002–003)*; [x] movement-density heatmap from retained movement records.
+- [x] One-click demonstrations for normal operations, narrow-aisle conflict, deadlock, carrying failure, aisle closure, and high-density stress.
+- [x] Judge-facing Demo Mode with playback, reset, speed, live metrics, event timeline, and completion state.
+- [x] Analytics time-window, robot, and mission-status filters; fleet and per-robot views.
 - [x] Event log and coordination decision trace *(Missions 002–003)*; [ ] explainable per-robot timeline.
 - [ ] End-to-end UI tests and larger-map performance checks.
-- [ ] Concise demo flow and technical explanation.
+- [x] Concise judge demonstration flow documented in README.
+
+Analytics limitation: scenario scope is the currently loaded run. The app does not archive snapshots for cross-scenario comparison. Movement and event visualizations respect their bounded log horizons; cumulative counters remain all-run values.
 
 ## Delivery rule
 

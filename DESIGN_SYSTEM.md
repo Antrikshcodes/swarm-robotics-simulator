@@ -27,8 +27,7 @@ Use semantic colors consistently. Do not make every element bright.
 
 ## Typography
 
-- Geist Sans for interface text.
-- Geist Mono for coordinates, IDs, timestamps, metrics, and telemetry.
+- System sans stack for interface text; system monospace stack for coordinates, IDs, timestamps, metrics, and telemetry. Keeping font resolution local makes production builds work without network access.
 - Use clear hierarchy and compact technical labels.
 - Numeric values should align and remain easy to scan.
 
@@ -67,3 +66,9 @@ Use semantic colors consistently. Do not make every element bright.
 ## Responsive behavior
 
 Desktop is the priority for the full simulation workspace. On smaller screens, preserve the ability to inspect status and navigate, but do not pretend the entire control-room layout is equally usable on mobile.
+# Analytics and judge mode
+
+- Analytics filters use compact labeled selects for time window, robot, and mission status.
+- Data cards retain the `Panel` and `Stat` primitives; tabular values use monospace numerals and status colours from the SWARM token palette.
+- Congestion visualization is labeled as movement density and uses cyan/amber intensity. It does not claim to measure dwell or blocked time.
+- Demo Mode reuses the warehouse preview renderer and operational event severity colours. Scenario launch actions are paired with visible engine playback controls.

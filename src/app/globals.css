@@ -10,6 +10,8 @@
  * (see src/lib/canvas-theme.ts), so never duplicate hex values in TS.
  */
 :root {
+  --font-geist-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-geist-mono: "SFMono-Regular", Menlo, Consolas, monospace;
   /* Core palette (DESIGN_SYSTEM.md) */
   --swarm-bg: #090d10;
   --swarm-sidebar: #11191e;

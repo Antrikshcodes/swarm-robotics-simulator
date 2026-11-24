@@ -39,6 +39,7 @@ Planned application areas:
 - Incidents
 - Analytics
 - Settings
+- Demo Mode (judge-facing scenario launcher)
 
 ## Primary user journey
 
@@ -50,6 +51,8 @@ Planned application areas:
 6. Inspect how the planner responds.
 7. Trigger or observe a robot failure and verify safe package custody transfer.
 8. Review performance metrics and event history.
+
+Mission 006 adds an interactive Demo Mode at `/demo`. It selects among existing deterministic engine scenarios and exposes playback, reset, speed, a live warehouse canvas, operational metrics, and current event history. Analytics are scoped to the loaded run because scenario snapshots are not archived across resets or scenario changes.
 
 ## Demonstration scenarios
 
