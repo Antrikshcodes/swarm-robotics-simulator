@@ -51,11 +51,9 @@ export function WarehouseCanvas({ className }: { className?: string }) {
   const layoutKey = useSimulationStore((s) => s.scenarioId);
   const showCoordinates = usePreferences((s) => s.showCoordinates);
 
+  // setViewport re-fits automatically until the user zooms or pans.
   const onResize = useCallback(({ width, height }: { width: number; height: number }) => {
-    const store = useViewportStore.getState();
-    const first = store.viewportWidth === 0;
-    store.setViewport(width, height);
-    if (first) store.fitToView();
+    useViewportStore.getState().setViewport(width, height);
   }, []);
 
   const resolveView = useCallback((size: { width: number; height: number }) => viewFromStore(size), []);

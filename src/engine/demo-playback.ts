@@ -38,8 +38,10 @@ const MAX_EVENTS = 200;
 const MAX_FINISHED_MISSIONS = 120;
 const LOW_BATTERY = 20;
 
-const BATTERY_DRAIN_MOVE = 0.12;
-const BATTERY_DRAIN_IDLE = 0.02;
+// Sample telemetry only: tuned so a typical demo run (≈1 000 ticks) does not
+// drain healthy robots into low-battery alerts. Not a battery model.
+const BATTERY_DRAIN_MOVE = 0.035;
+const BATTERY_DRAIN_IDLE = 0.008;
 const BATTERY_CHARGE = 1.1;
 
 interface RobotRuntime {

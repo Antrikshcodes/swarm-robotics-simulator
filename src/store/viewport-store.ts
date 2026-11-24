@@ -21,6 +21,8 @@ interface ViewportState {
   gridWidth: number;
   gridHeight: number;
   tool: CanvasTool;
+  /** True until the user zooms or pans manually; keeps the view fitted on resize. */
+  autoFit: boolean;
 
   setViewport: (width: number, height: number) => void;
   setGrid: (width: number, height: number) => void;
@@ -45,14 +47,18 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   gridWidth: 0,
   gridHeight: 0,
   tool: "select",
+  autoFit: true,
 
-  setViewport: (viewportWidth, viewportHeight) => set({ viewportWidth, viewportHeight }),
+  setViewport: (viewportWidth, viewportHeight) => {
+    set({ viewportWidth, viewportHeight });
+    if (get().autoFit) get().fitToView();
+  },
 
   setGrid: (gridWidth, gridHeight) => set({ gridWidth, gridHeight }),
 
   setTool: (tool) => set({ tool }),
 
-  panBy: (dx, dy) => set((s) => ({ offsetX: s.offsetX + dx, offsetY: s.offsetY + dy })),
+  panBy: (dx, dy) => set((s) => ({ offsetX: s.offsetX + dx, offsetY: s.offsetY + dy, autoFit: false })),
 
   zoomBy: (factor, ax, ay) => {
     const s = get();
@@ -65,6 +71,7 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
       scale: next,
       offsetX: anchorX - (anchorX - s.offsetX) * ratio,
       offsetY: anchorY - (anchorY - s.offsetY) * ratio,
+      autoFit: false,
     });
   },
 
@@ -77,9 +84,13 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
     );
     const scale = clampScale(cellFit / BASE_CELL_PX);
     centre(set, s, scale);
+    set({ autoFit: true });
   },
 
-  resetZoom: () => centre(set, get(), 1),
+  resetZoom: () => {
+    centre(set, get(), 1);
+    set({ autoFit: false });
+  },
 
   centerOn: (x, y) => {
     const s = get();
@@ -87,6 +98,7 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
     set({
       offsetX: Math.round(s.viewportWidth / 2 - (x + 0.5) * cell),
       offsetY: Math.round(s.viewportHeight / 2 - (y + 0.5) * cell),
+      autoFit: false,
     });
   },
 }));

@@ -67,7 +67,7 @@ export function OverviewDashboard() {
       </PageIntro>
 
       {/* KPI panels */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel>
           <PanelHeader title="Fleet" icon={<Bot />} description={`${m.totalRobots} robots registered in this scenario`} />
           <PanelBody className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
@@ -88,7 +88,7 @@ export function OverviewDashboard() {
         </Panel>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         {/* Warehouse preview */}
         <Panel className="flex flex-col overflow-hidden">
           <PanelHeader
@@ -164,7 +164,7 @@ export function OverviewDashboard() {
         </Panel>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         {/* Fleet activity */}
         <Panel>
           <PanelHeader
