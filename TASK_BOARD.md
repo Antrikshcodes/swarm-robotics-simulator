@@ -40,6 +40,33 @@ Run on `feat/mission-001-frontend`, Node 24, Next.js 16.4.6:
 - `npm run build` — all 7 routes prerendered as static
 - Manual browser checks at 1440×900, 1280×720 and 375×812: every route, sidebar navigation, scenario switching (toolbar and top bar), robot/station/cell selection and inspector, zoom/fit/reset/wheel/pan, grid and overlay toggles, play/pause/step/reset, speed, timeline seek, event-strip jump, incident replay, settings persistence and restore
 
+## Current milestone: Mission 002 — Real simulation engine
+
+Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review** pending independent review.
+
+| ID | Task | Status | Owner |
+|---|---|---|---|
+| M2-01 | Inspect engine, stores, components and tests | Done | Claude Code |
+| M2-02 | World model types, result/error model, seeded PRNG, layout validation | Review | Claude Code |
+| M2-03 | A* pathfinding with deterministic tie-breaking + tests | Review | Claude Code |
+| M2-04 | Package custody state machine + invariant tests | Review | Claude Code |
+| M2-05 | Mission and robot lifecycle state machines + tests | Review | Claude Code |
+| M2-06 | Discrete-tick engine: scheduler, movement, occupancy guard, replanning | Review | Claude Code |
+| M2-07 | Command interface with explicit results and replayable command log | Review | Claude Code |
+| M2-08 | Event system, metrics derivation, per-tick invariant checks | Review | Claude Code |
+| M2-09 | Port three scenarios to engine-driven behaviour | Review | Claude Code |
+| M2-10 | Integrate engine with Studio and all routes (commands, toasts, custody, closures) | Review | Claude Code |
+| M2-11 | Lint, typecheck, tests, build, browser verification | Done | Claude Code |
+| M2-12 | Independent review of Mission 002 | Todo | Codex |
+
+### M2-11 verification record
+
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` — passes (strict)
+- `npm test` — 51/51 passing across 4 files (A* 8, custody 8, lifecycles 6, engine 29), including 1 500-tick runs of every scenario with invariants checked each tick and 2 000-tick liveness checks
+- `npm run build` — all 7 routes prerendered
+- Browser (1440×900): engine-driven movement in all three scenarios; narrow-aisle head-on wait and replan; high-density scheduled R-07 failure; Mark failed (mission → recovery-required, custody retained); close / reopen cell (inspector and Incidents page); queue and cancel mission; all routes render without console errors
+
 ## Next milestones
 
 Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md).

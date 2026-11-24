@@ -2,6 +2,26 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-24 — Mission 002: real simulation engine (`feat/mission-001-frontend`)
+
+### Added
+- `WarehouseEngine`: deterministic, command-driven discrete-tick simulation that owns all world state and replaces the scripted demo playback.
+- A* pathfinding (Manhattan, 4-connected, deterministic tie-breaking, explicit failure reasons).
+- Package custody state machine with append-only history; mission and robot lifecycle state machines with validated transitions.
+- Nearest-robot mission assignment, seeded mission feed, return-to-home and low-battery charging behaviour, simplified battery model.
+- Sequential occupancy guard (no collisions or swaps) with bounded-wait replanning, a head-on yield rule and step-aside when the yielder has no alternative route.
+- Commands with explicit results: start, pause, step, reset, load-scenario, select-robot, add-mission, cancel-mission, close-aisle, reopen-aisle, fail-robot; command log with deterministic seek replay.
+- Event system with stable ids, separate movement log, derived metrics, `checkInvariants()` after every tick and command outside production.
+- UI: command toast; inspector task / route / custody trail; Mark failed; close / reopen cell; queue mission from a pickup station; Missions page new-mission form, custody column and cancel; incident reopen; closed cells on the canvas; `ENGINE` data badge.
+- 51 tests across A*, custody, lifecycles and engine behaviour (including per-tick invariants and 2 000-tick liveness for the shipped scenarios).
+
+### Changed
+- Scenarios now define robot homes, initial missions, a seeded feed and scheduled commands instead of scripted robot programs.
+- Snapshot contract extended (closures, packages, movements, robot action / home / blockedTicks, mission history); `fault` status renamed `failed`.
+
+### Removed
+- `DemoPlayback` and scripted robot programs.
+
 ## 2026-11-24 — Mission 001: frontend foundation (`feat/mission-001-frontend`)
 
 ### Added

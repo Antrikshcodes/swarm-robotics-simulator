@@ -54,10 +54,29 @@ src/
 
 Adapt to the generated scaffold if it has a better idiomatic structure; preserve the separation of concerns.
 
-### Current implementation (Mission 001)
+### Current implementation (Mission 002)
 
-- `src/engine/` currently contains `layout.ts` (ASCII map parser), `scenario.ts` (definitions, compilation and validation), `demo-playback.ts` and `scenarios/`. `DemoPlayback` implements `SimulationSource` (`step`, `reset`, `seek`, `getSnapshot`) by replaying hand-authored robot programs. It is deterministic and React-free, but it performs **no** planning, reservation, collision prevention, deadlock or recovery logic.
-- The planned `pathfinding/`, `coordination/`, `reservations/`, `deadlock/`, `recovery/`, `scheduler/` modules and `simulation-loop.ts` do not exist yet. The real engine should implement the same `SimulationSource` interface and emit the snapshot type in `src/types/simulation.ts` so that the UI does not change.
+```text
+src/engine/
+  core/result.ts            Result / EngineError / InvariantViolation
+  core/prng.ts              seeded PRNG (mulberry32)
+  world/layout.ts           ASCII parser, bounds, traversability, grid helpers
+  pathfinding/astar.ts      A* (+ min-heap)                       ← "Pathfinding"
+  custody/package-custody.ts custody state machine                ← part of "Recovery manager" data model
+  missions/mission-lifecycle.ts mission state machine             ← part of "Mission scheduler"
+  robots/robot-lifecycle.ts robot status transitions
+  commands.ts               command types and log entries
+  invariants.ts             checkInvariants(snapshot)
+  metrics.ts                derived fleet metrics
+  scenario.ts, scenarios/   definitions, validation, three scenarios
+  warehouse-engine.ts       WarehouseEngine: world state, tick loop, scheduler,
+                            occupancy guard, commands, events, snapshots
+```
+
+- `WarehouseEngine` implements `SimulationSource` (`step`, `reset`, `seek`, `getSnapshot`, `dispatch`). It is the single owner of world state; the UI only reads snapshots and sends commands.
+- Assignment (nearest available robot by A* cost) and the occupancy guard currently live inside `warehouse-engine.ts`. When reservations arrive (Mission 004), extract `scheduler/` and `coordination/` modules and replace the guard's "is the next cell free now?" check with a reservation-table query. The world model, command log, snapshot contract and tick order stay unchanged.
+- Deadlock detection (Mission 005) slots in after step 5 of the tick order, reading `blockedTicks` and the robot that holds each blocked robot's next cell.
+- Recovery (Mission 006) adds world commands (e.g. reassign, recover robot) and custody transfer functions. `recovering` status and its transitions already exist.
 - Wall-clock pacing lives in `components/layout/playback-driver.tsx`; the engine never owns timers.
 - The Canvas renderer (`src/lib/render/warehouse-renderer.ts`) is a pure function of snapshot + view + options. `useWarehouseRenderer` draws on demand outside React renders.
 
@@ -89,6 +108,8 @@ Canvas draws the current world and interpolation between engine snapshots. Rende
 
 ## State and data flow
 
+Implemented as described below; see API_CONTRACTS.md for the exact command and snapshot shapes.
+
 1. UI dispatches a command (start, pause, add task, close aisle, fail robot).
 2. Engine validates the command and mutates authoritative state.
 3. Coordinator produces safe next actions using reservations.
@@ -111,3 +132,13 @@ Canvas draws the current world and interpolation between engine snapshots. Rende
 - Use selectors and stable snapshots for UI state.
 - Keep event history bounded in memory with optional persistence.
 - Profile before optimizing; document any algorithmic trade-offs.
+
+### Measured (Mission 002, Node 24, invariant checks on)
+
+| Scenario | 1 000 × `step()` (with / without invariants) | `seek(1000)` from 0 | Deliveries / 1 000 ticks |
+|---|---|---|---|
+| Standard (5 robots) | ~26 ms / ~14 ms | ~9 ms | 51 |
+| Narrow aisle (4 robots) | ~11 ms / ~9 ms | ~4 ms | 45 |
+| High density (8 robots) | ~25 ms / ~18 ms | ~10 ms | 72 |
+
+Trade-offs: A* runs on assignment, on route invalidation and on bounded-wait replans, not every tick. Seek replays from tick 0 (no checkpoints); this is fine for thousands of ticks but would need periodic snapshots for very long runs. Snapshots are rebuilt lazily once per change. Missions/packages beyond the latest 200 finished ones are pruned; events (300) and movement records (400) are ring-buffered.

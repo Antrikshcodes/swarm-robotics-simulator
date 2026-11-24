@@ -23,29 +23,37 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 
 **Out of scope (still):** pathfinding, coordination, backend, real-time network layer, persistence, and final simulation algorithms.
 
-## Mission 002 — World model and visual simulator
+## Mission 002 — World model and simulation engine
 
-Groundwork from Mission 001: typed snapshot contract, ASCII layouts, a deterministic tick loop (scripted), Canvas rendering, pan/zoom/selection/inspector, scenario loading and playback controls already exist. Mission 002 replaces the scripted playback with an authoritative world model.
+Status: implementation complete on `feat/mission-001-frontend`, awaiting independent review.
 
-- [ ] Define typed warehouse, station, obstacle, robot, and mission models as engine-owned mutable state with validated commands (see API_CONTRACTS.md).
-- [ ] Implement the deterministic discrete-tick simulation loop with invariant checks.
-- [ ] Render grid, stations, obstacles, and robots on Canvas *(renderer exists; connect it to engine snapshots)*.
-- [ ] Add pan, zoom, selection, and entity inspector *(exists; extend for new entities such as closures)*.
-- [ ] Add scenario loading and simulation playback controls *(exists; switch to the engine source)*.
+- [x] Define typed warehouse, station, obstacle, closure, robot, package and mission models with stable IDs and validated coordinates.
+- [x] Implement the deterministic discrete-tick simulation loop with a fixed tick order and per-tick invariant checks.
+- [x] Render engine snapshots on Canvas (closures added).
+- [x] Pan, zoom, selection and entity inspector connected to engine state.
+- [x] Scenario loading and playback controls driving the engine; seek by command-log replay.
+- [x] A* pathfinding with deterministic tie-breaking *(pulled forward from Mission 003)*.
+- [x] Mission queue, nearest-robot assignment and live mission creation *(pulled forward from Mission 003)*.
+- [x] Package custody state machine with explicit, audited transitions.
+- [x] Command interface: start, pause, step, reset, load scenario, select robot, add/cancel mission, close/reopen aisle, mark robot failed.
+- [x] Basic safety: sequential occupancy guard (no collisions, no swaps), bounded-wait replanning.
+- [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 003 — Missions and pathfinding
+## Mission 003 — Scheduling and operator tooling
 
-- [ ] Implement mission queue and assignment.
-- [ ] Implement A* pathfinding with deterministic tie-breaking.
-- [ ] Visualise paths and mission state.
-- [ ] Support task creation while simulation is running.
+Much of the original Mission 003 (A*, queue, assignment, live task creation, path visualisation) landed in Mission 002. Remaining:
+
+- [ ] Mission priorities, deadlines and assignment beyond greedy nearest-robot (e.g. batch / Hungarian assignment).
+- [ ] Multi-cell aisle closure tooling (drag-select a segment) and scheduled reopen.
+- [ ] Scenario editor or import for custom layouts.
+- [ ] Engine checkpoints for faster long-range seek.
 
 ## Mission 004 — Multi-robot coordination and safety
 
-- [ ] Implement time-indexed cell reservations.
-- [ ] Implement directed-edge reservations and head-on swap prevention.
+- [ ] Implement time-indexed cell reservations (replace the occupancy guard's "free right now" check).
+- [ ] Implement directed-edge reservations and head-on swap prevention at planning time *(swaps are already impossible at execution time and checked by invariants)*.
 - [ ] Add conflict-aware replanning.
-- [ ] Add invariant checks and adversarial tests.
+- [x] Invariant checks for collisions, swaps, custody and mission consistency *(Mission 002)*; [ ] adversarial / property-based tests.
 
 ## Mission 005 — Deadlock detection and recovery
 

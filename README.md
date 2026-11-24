@@ -6,12 +6,12 @@ SWARM is an autonomous multi-robot warehouse coordination and simulation platfor
 
 ## Project status
 
-**Phase:** Mission 001 — frontend foundation (in review)
+**Phase:** Mission 002 — real simulation engine (in review)
 **Problem statement:** NexHack 2.0 — PS 05
 **Repository:** [Antrikshcodes/swarm-robotics-simulator](https://github.com/Antrikshcodes/swarm-robotics-simulator)
-**Working branch:** `feat/mission-001-frontend` (not merged to `main`)
+**Working branch:** `feat/mission-001-frontend` (Missions 001–002; not merged to `main`)
 
-Mission 001 delivers the application shell, design system, Simulation Studio, and all seven routes, driven by a **deterministic scripted demo playback**. The coordination engine — pathfinding, reservations, collision prevention, deadlock and failure recovery — is **not implemented yet** (Missions 002–006).
+The Simulation Studio is driven by a **deterministic, command-driven engine**: A* routing, mission scheduling, package custody, aisle closures, robot failure, and per-tick safety invariants. Time-indexed reservations, deadlock detection and automatic failure recovery are **not implemented yet** (Missions 004–006).
 
 ## What works today
 
@@ -19,18 +19,26 @@ Mission 001 delivers the application shell, design system, Simulation Studio, an
 |---|---|
 | Shell | Persistent sidebar (collapsible, persisted), top bar with breadcrumb, scenario selector, playback status, alerts menu, operator menu |
 | Overview `/` | Fleet and mission KPIs, live warehouse preview, active alerts, fleet activity, recent events |
-| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, robots, routes, rulers); select/pan, wheel and button zoom, fit, reset; grid/coordinate/route/label toggles; inspector for robots, stations and cells; play/pause/step/reset, 0.5–4× speed, seekable timeline, clickable event strip; keyboard shortcuts |
+| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, closures, robots, A* routes, rulers); select/pan, zoom, fit, reset, overlay toggles; inspector for robots (task, route, custody trail, **mark failed**), stations (**queue mission**) and cells (**close / reopen**); play/pause/step/reset, 0.5–4× speed, seekable timeline, event strip; keyboard shortcuts |
 | Fleet `/fleet` | Status-filtered robot roster, inspect-in-studio |
-| Missions `/missions` | Lifecycle KPIs and state-filtered mission log |
-| Incidents `/incidents` | Derived incident queue (faults, conflict holds, low battery), locate and replay-from-tick |
+| Missions `/missions` | Lifecycle KPIs, **new-mission form**, state-filtered log with custody column and **cancel** |
+| Incidents `/incidents` | Derived incident queue (failed robots, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure |
 | Analytics `/analytics` | Throughput (chart + table), cycle time, utilisation, per-robot time allocation |
 | Settings `/settings` | Tick duration, motion smoothing, canvas overlays, compact sidebar, shortcut reference |
 
-Three scenarios ship: **Standard warehouse**, **Narrow aisle** (head-on conflict at a one-cell passage, resolved by a *scripted* hold), and **High-density warehouse** (8 robots, a *scripted* drive fault on R-07 while carrying).
+Three scenarios ship: **Standard warehouse** (5 robots, seeded mission feed), **Narrow aisle** (opposing missions meet in a one-cell passage; the yielding robot replans via a bypass), and **High-density warehouse** (8 robots, heavy feed, R-07 failed by a scheduled command at tick 40).
 
-### About the data
+### What the engine does
 
-Every number in the UI is **computed live** from the demo playback snapshot — nothing is hardcoded — and every metric surface carries a `DEMO SCRIPT` badge. Robot movement follows hand-authored loops, not planner output. Battery is sample telemetry, not a battery model. A test-only audit checks that the scripts never place two robots in one cell or swap them; the engine itself does no collision checking yet.
+- **World model:** ASCII warehouse grid (lanes, narrow passages, racks, obstacles, pickup / drop-off / charging stations), dynamic closures, robots, missions, packages, events. All entities have stable IDs; coordinates are validated.
+- **A\* pathfinding:** Manhattan heuristic, 4-connected, deterministic tie-breaking; station cells only as goals; closures and stationary robots as blockers.
+- **Scheduling:** missions queue from the scenario, a seeded feed, or the UI; each goes to the nearest available robot (A* cost, then robot ID). Idle robots return home; low-battery robots seek a free charger.
+- **Lifecycles:** validated mission states (`queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed`, plus `cancelled`, `recovery-required`) and package custody (`available → reserved → picked-up → in-transit → delivered`) with append-only history.
+- **Safety:** a sequential occupancy guard prevents cell collisions and head-on swaps; blocked robots wait and replan after a bounded wait (yield rule and step-aside for head-on blocks). `checkInvariants()` runs after every tick and command outside production builds.
+- **Commands:** start, pause, step, reset, load scenario, select robot, add / cancel mission, close / reopen aisle, mark robot failed — each returns an explicit success or error, shown as a toast.
+- **Determinism:** same scenario + same command sequence ⇒ identical snapshots. The timeline seeks by replaying the command log.
+
+Every number in the UI is derived from engine state and carries an `ENGINE` badge. See [SIMULATION_RULES.md](SIMULATION_RULES.md) for exactly what is enforced versus planned.
 
 ## Local development
 
@@ -52,7 +60,7 @@ Open http://localhost:3000.
 | `npm run build` / `npm start` | Production build / serve |
 | `npm run lint` | ESLint (Next.js core-web-vitals + TypeScript rules) |
 | `npm run typecheck` | Generate route types, then `tsc --noEmit` (strict) |
-| `npm test` | Vitest engine tests |
+| `npm test` | Vitest engine tests (A*, custody, lifecycles, engine behaviour, invariants) |
 | `npm run check` | lint + typecheck + tests |
 
 ### Studio keyboard shortcuts
@@ -83,10 +91,14 @@ src/
     simulation/        studio, canvas, toolbar, inspector, playback bar, preview, render hook
     overview/ fleet/ missions/ incidents/ analytics/ settings/
     ui/                shadcn primitives + SWARM primitives (Panel, Stat, StatusBadge, …)
-  engine/              pure TypeScript simulation layer (no React)
-    layout.ts          ASCII warehouse parser
-    scenario.ts        scenario definitions + compiler/validation
-    demo-playback.ts   deterministic scripted playback (SimulationSource)
+  engine/              pure TypeScript simulation engine (no React, DOM, timers or Math.random)
+    warehouse-engine.ts  WarehouseEngine: tick loop, scheduler, movement, commands, events, snapshots
+    pathfinding/       A* + min-heap
+    custody/           package custody state machine
+    missions/ robots/  lifecycle state machines
+    world/layout.ts    ASCII warehouse parser and grid helpers
+    core/              Result types, seeded PRNG
+    commands.ts invariants.ts metrics.ts scenario.ts
     scenarios/         standard, narrow-aisle, high-density
   lib/
     render/            Canvas theme + pure warehouse renderer
@@ -98,21 +110,23 @@ src/
 
 ## Key technical decisions
 
-- **Engine/UI boundary.** `src/engine` is pure TypeScript with no React, DOM, timers or randomness. It exposes a `SimulationSource` (`step`, `reset`, `seek`, `getSnapshot`) that emits immutable snapshots matching `src/types/simulation.ts`. Mission 002+ replaces `DemoPlayback` behind the same interface; the UI does not change.
-- **Time is owned outside the engine.** A single `PlaybackDriver` in the app shell turns wall-clock time into ticks, so playback continues across page navigation.
-- **Deterministic seek.** The timeline replays from tick 0 to the target tick; same scenario + tick ⇒ identical snapshot (tested).
-- **Canvas off the React render path.** Drawing subscribes to stores directly and runs on demand: one frame per state change, plus frames while robots interpolate between ticks. React never re-renders per frame.
-- **One source of colour.** Tokens live in `globals.css`; the Canvas renderer reads the same CSS custom properties at runtime.
-- **Honest UI.** Every control performs a real action; unbuilt capabilities appear as clearly labelled "Planned · Mission 00X" notes, never as fake buttons.
+- **Engine/UI boundary.** `src/engine` owns all world state. The UI reads immutable snapshots (`src/types/simulation.ts`) and sends commands through `dispatch()`. A remote engine could implement the same `SimulationSource` interface.
+- **Explicit results.** Commands, custody transitions, lifecycle transitions and pathfinding return success/error values; internal impossibilities throw `InvariantViolation`.
+- **Fixed tick order** (scheduled commands → feed → assignment → robots in ID order → logged commands → invariants) makes runs reproducible.
+- **Safety before efficiency.** The occupancy guard rules out collisions and swaps by construction; efficiency (reservations) and liveness (deadlock handling) are later missions.
+- **Time is owned outside the engine.** `PlaybackDriver` turns wall-clock time into `step()` calls; the engine has no timers.
+- **Canvas off the React render path**, and **one source of colour** (CSS tokens read by the renderer), as in Mission 001.
 
 ## Known limitations
 
-- No pathfinding, reservations, collision prevention, deadlock handling or failure recovery — routes, yields and faults are scripted.
-- Missions cannot be created from the UI; backlog missions stay queued (no scheduler).
+- **No time-indexed reservations.** Robots plan spatially and resolve conflicts by waiting and replanning; congestion causes waits and detours.
+- **No deadlock detection or recovery policy.** Bounded-wait replanning resolves the head-on cases in the shipped scenarios, but liveness is not guaranteed for every geometry.
+- **No automatic failure recovery.** A failed robot keeps its package and its mission becomes `recovery-required`; there is no command to repair the robot or transfer custody yet.
+- Assignment is greedy nearest-robot; no priorities, deadlines or batching.
+- Battery is a simplified model.
 - Simulation state is in memory and resets on full page reload. Preferences persist in `localStorage`.
-- Event history is bounded to the latest 200 events and 120 completed missions.
-- Desktop-first. Narrow screens get a usable stacked layout, but the studio is designed for ≥ 1280 px.
-- No authentication or backend.
+- Seek replays from tick 0 (fast for thousands of ticks; no checkpoints).
+- Desktop-first UI; no authentication or backend.
 
 ## Documentation
 
