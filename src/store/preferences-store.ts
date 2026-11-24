@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+export type StudioView = "3d" | "2d";
+
 export const TICK_DURATIONS = [250, 400, 600, 1000] as const;
 export type TickDuration = (typeof TICK_DURATIONS)[number];
 
@@ -18,6 +20,10 @@ export interface Preferences {
   interpolateMotion: boolean;
   /** Wall-clock duration of one tick at 1× speed. */
   tickMs: TickDuration;
+  /** Simulation Studio view: the 3D warehouse (default) or the 2D diagnostic grid. */
+  studioView: StudioView;
+  /** 3D: cut racks down to their first level so robots in narrow aisles stay visible. */
+  rackCutaway: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -30,6 +36,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showWaitLinks: true,
   interpolateMotion: true,
   tickMs: 400,
+  studioView: "3d",
+  rackCutaway: false,
 };
 
 interface PreferencesState extends Preferences {
@@ -66,6 +74,8 @@ export const usePreferences = create<PreferencesState>()(
         showWaitLinks: s.showWaitLinks,
         interpolateMotion: s.interpolateMotion,
         tickMs: s.tickMs,
+        studioView: s.studioView,
+        rackCutaway: s.rackCutaway,
       }),
     },
   ),
