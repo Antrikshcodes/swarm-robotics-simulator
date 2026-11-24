@@ -3,7 +3,7 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
-import { Html, Line } from "@react-three/drei";
+import { Line } from "@react-three/drei";
 import type { Line2 } from "three-stdlib";
 import type { GridPoint, SimulationSnapshot, Station } from "@/types/simulation";
 import { frameOf, gridToWorld, type GridFrame } from "@/lib/scene3d/grid-to-world";
@@ -25,7 +25,7 @@ const toVec = (frame: GridFrame, p: GridPoint, y: number): [number, number, numb
 
 // ------------------------------------------------------------------ stations
 
-export function Stations({ stations, frame, showLabels }: { stations: readonly Station[]; frame: GridFrame; showLabels: boolean }) {
+export function Stations({ stations, frame }: { stations: readonly Station[]; frame: GridFrame }) {
   return (
     <group>
       {stations.map((s) => {
@@ -47,13 +47,6 @@ export function Stations({ stations, frame, showLabels }: { stations: readonly S
                 <boxGeometry args={[0.5, 0.4, 0.08]} />
                 <meshStandardMaterial color="#2c3438" metalness={0.5} roughness={0.5} />
               </mesh>
-            ) : null}
-            {showLabels ? (
-              <Html position={[-0.42, 1.38, -0.42]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-                <div className="rounded-sm bg-[#0b1013]/80 px-1 font-mono text-[10px] font-semibold whitespace-nowrap" style={{ color }}>
-                  {s.id}
-                </div>
-              </Html>
             ) : null}
           </group>
         );

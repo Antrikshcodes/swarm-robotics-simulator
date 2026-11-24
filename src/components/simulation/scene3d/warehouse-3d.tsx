@@ -16,6 +16,7 @@ import { presetPose, CameraRig } from "./camera-rig";
 import { selectionSource, useCamera3D } from "./camera-store";
 import { Closures, Incidents, Reservations, Routes, Stations } from "./overlays";
 import { RobotFleet } from "./robot-fleet";
+import { SceneLabels } from "./scene-labels";
 import { WarehouseFloor } from "./warehouse-floor";
 import { WarehouseRacks } from "./warehouse-racks";
 
@@ -55,6 +56,7 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
+  const labelLayerRef = useRef<HTMLDivElement>(null);
   const [quality] = useState<Quality>(detectQuality);
   const [dpr, setDpr] = useState(() => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, MAX_DPR[quality]));
   const layout = useSimulationStore((s) => s.snapshot.layout);
@@ -65,9 +67,14 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const cutawayPref = usePreferences((s) => s.rackCutaway);
   const cutaway = cutawayPref || isCorridorLayout(layout);
 
-  // Reset to the default view whenever a different scenario (layout) loads.
+  // On a new layout, return to the default view — unless a robot is being
+  // followed / chased (e.g. "Focus in 3D Studio" from the Fleet page) and still exists.
   useEffect(() => {
-    useCamera3D.getState().setPreset("isometric", null);
+    const { preset, robotId } = useCamera3D.getState();
+    const tracking = (preset === "follow" || preset === "chase") && robotId !== null;
+    const exists = tracking && useSimulationStore.getState().snapshot.robots.some((r) => r.id === robotId);
+    if (exists) useCamera3D.getState().setPreset(preset, robotId);
+    else useCamera3D.getState().setPreset("isometric", null);
   }, [layout]);
 
   const onHoverCell = (cell: GridPoint | null) => {
@@ -120,7 +127,7 @@ export default function Warehouse3D({ className }: { className?: string }) {
         <Lighting frame={frame} quality={quality} />
         <WarehouseFloor layout={layout} showGrid={usePreferencesValue("showGrid")} onSelectCell={onSelectCell} onHoverCell={onHoverCell} />
         <WarehouseRacks layout={layout} quality={quality} cutaway={cutaway} />
-        <Stations stations={layout.stations} frame={frame} showLabels={usePreferencesValue("showLabels")} />
+        <Stations stations={layout.stations} frame={frame} />
         <LiveLayers palette={palette} />
         <OrbitControls
           makeDefault
@@ -134,7 +141,9 @@ export default function Warehouse3D({ className }: { className?: string }) {
         />
         <CameraRig frame={frame} />
         <FrameDriver statsRef={statsRef} />
+        <SceneLabels layer={labelLayerRef} />
       </Canvas>
+      <div ref={labelLayerRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" />
 
       <div
         ref={readoutRef}
@@ -169,7 +178,7 @@ function LiveLayers({ palette }: { palette: readonly string[] }) {
       {showReservations ? <Reservations snapshot={snapshot} palette={palette} selectedId={selectedId} /> : null}
       {showRoutes ? <Routes snapshot={snapshot} palette={palette} selectedId={selectedId} /> : null}
       <Incidents snapshot={snapshot} showWaitLinks={showWaitLinks} />
-      <RobotFleet snapshot={snapshot} palette={palette} showLabels={showLabels} />
+      <RobotFleet snapshot={snapshot} palette={palette} />
     </group>
   );
 }
