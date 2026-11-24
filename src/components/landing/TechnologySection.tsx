@@ -67,7 +67,7 @@ export function TechnologySection() {
   return (
     <section
       id="technology"
-      className="relative min-h-screen w-full flex flex-col justify-center py-24 px-6 md:px-12 lg:px-20 border-t border-[#141414]/9 overflow-hidden"
+      className="relative min-h-screen w-full flex flex-col justify-center py-24 px-6 md:px-12 lg:px-20 border-t border-white/[0.08] overflow-hidden"
     >
       <div className="max-w-7xl mx-auto w-full">
         {/* Section Heading */}
@@ -79,8 +79,8 @@ export function TechnologySection() {
             transition={{ duration: 0.6 }}
             className="flex items-center gap-2 mb-3"
           >
-            <span className="font-mono text-[10px] tracking-[0.2em] text-[#141414]/60 uppercase">
-              SECTION 04 // ENGINEERING SPECIFICATION
+            <span className="font-mono text-[10px] tracking-[0.2em] text-[#89969C] uppercase">
+              SCENE 06 {"//"} ENGINEERING SPECIFICATION
             </span>
           </motion.div>
 
@@ -89,7 +89,7 @@ export function TechnologySection() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.7, delay: 0.1 }}
-            className="text-4xl sm:text-6xl font-black tracking-[-0.03em] text-[#141414] leading-[0.98] mb-4"
+            className="font-display text-4xl sm:text-6xl font-black tracking-[-0.03em] text-[#F2F4F3] leading-[0.96] mb-4"
           >
             ENGINEERED TO <br />
             MOVE TOGETHER.
@@ -100,10 +100,10 @@ export function TechnologySection() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.7, delay: 0.2 }}
-            className="text-base sm:text-lg text-[#141414]/70 leading-relaxed"
+            className="text-base sm:text-lg text-[#89969C] leading-relaxed"
           >
-            Built upon verified deterministic algorithms and safety invariants.
-            No heuristics that fail under stress. Complete predictability at scale.
+            Built upon verified deterministic algorithms and mathematical safety invariants.
+            No heuristics that collapse under dense traffic. Complete predictability at scale.
           </motion.p>
         </div>
 
@@ -119,28 +119,28 @@ export function TechnologySection() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: index * 0.06 }}
-                className="group relative rounded-xl border border-[#141414]/10 bg-[#EEECE7]/60 p-5 backdrop-blur-sm transition-all duration-300 hover:border-[#141414]/30 hover:bg-[#EEECE7] hover:shadow-sm"
+                className="group relative rounded-2xl border border-white/10 bg-[#121A1E]/70 p-6 backdrop-blur-md transition-all duration-300 hover:border-[#40C8E8]/40 hover:bg-[#121A1E] hover:shadow-xl"
               >
                 {/* Tech Code */}
                 <div className="flex items-center justify-between mb-4">
-                  <span className="font-mono text-[10px] tracking-wider text-[#141414]/40 font-semibold group-hover:text-[#40C8E8] transition-colors">
+                  <span className="font-mono text-[10px] tracking-wider text-[#89969C] font-semibold group-hover:text-[#40C8E8] transition-colors">
                     {item.code}
                   </span>
-                  <Icon className="size-4 text-[#141414]/50 group-hover:text-[#141414] transition-colors" />
+                  <Icon className="size-4 text-[#89969C] group-hover:text-[#F2F4F3] transition-colors" />
                 </div>
 
                 {/* Title */}
-                <h3 className="font-mono text-sm font-bold tracking-tight text-[#141414] mb-2 leading-snug">
+                <h3 className="font-mono text-sm font-bold tracking-tight text-[#F2F4F3] mb-2 leading-snug">
                   {item.title}
                 </h3>
 
                 {/* Description */}
-                <p className="text-xs text-[#141414]/65 leading-relaxed">
+                <p className="text-xs text-[#89969C] leading-relaxed">
                   {item.description}
                 </p>
 
                 {/* Accent line on hover */}
-                <div className="absolute bottom-0 left-4 right-4 h-[2px] bg-[#40C8E8] scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
+                <div className="absolute bottom-0 left-6 right-6 h-[2px] bg-[#40C8E8] scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
               </motion.div>
             );
           })}

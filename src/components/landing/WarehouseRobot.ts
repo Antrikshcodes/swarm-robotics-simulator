@@ -65,12 +65,12 @@ export class WarehouseRobot {
   }
 
   private buildChassis() {
-    // Lower graphite chassis body
+    // Lower stealth graphite chassis body
     const chassisGeo = new THREE.BoxGeometry(1.2, 0.22, 1.6);
     const chassisMat = new THREE.MeshStandardMaterial({
-      color: 0x20272b,
+      color: 0x121a1e,
       roughness: 0.55,
-      metalness: 0.4,
+      metalness: 0.45,
     });
     const chassis = new THREE.Mesh(chassisGeo, chassisMat);
     chassis.position.y = 0.24;
@@ -81,8 +81,8 @@ export class WarehouseRobot {
     // Bumper guard rim
     const bumperGeo = new THREE.BoxGeometry(1.26, 0.12, 1.68);
     const bumperMat = new THREE.MeshStandardMaterial({
-      color: 0x14181a,
-      roughness: 0.8,
+      color: 0x080b0d,
+      roughness: 0.85,
       metalness: 0.2,
     });
     const bumper = new THREE.Mesh(bumperGeo, bumperMat);
@@ -95,7 +95,7 @@ export class WarehouseRobot {
     const underglowMat = new THREE.MeshBasicMaterial({
       color: 0x40c8e8,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.9,
     });
     const underglow = new THREE.Mesh(underglowGeo, underglowMat);
     underglow.position.y = 0.12;
@@ -103,12 +103,12 @@ export class WarehouseRobot {
   }
 
   private buildUpperShell() {
-    // Off-white rounded matte upper shell
+    // Off-white rounded satin upper shell
     const shellGeo = new THREE.BoxGeometry(1.14, 0.38, 1.52);
     const shellMat = new THREE.MeshStandardMaterial({
-      color: 0xeee7dd,
-      roughness: 0.32,
-      metalness: 0.06,
+      color: 0xd8dce0,
+      roughness: 0.28,
+      metalness: 0.12,
     });
     const shell = new THREE.Mesh(shellGeo, shellMat);
     shell.position.y = 0.52;
@@ -126,7 +126,7 @@ export class WarehouseRobot {
     // Fine seam line between shell panels
     const seamGeo = new THREE.BoxGeometry(1.15, 0.015, 0.015);
     const seamMat = new THREE.MeshStandardMaterial({
-      color: 0x9c968c,
+      color: 0x243038,
       roughness: 0.9,
     });
     const seam = new THREE.Mesh(seamGeo, seamMat);
@@ -138,15 +138,15 @@ export class WarehouseRobot {
     // Beveled screen bezel (Front faces -Z)
     const bezelGeo = new THREE.BoxGeometry(0.78, 0.3, 0.06);
     const bezelMat = new THREE.MeshStandardMaterial({
-      color: 0x121619,
+      color: 0x0d1215,
       roughness: 0.2,
-      metalness: 0.8,
+      metalness: 0.85,
     });
     const bezel = new THREE.Mesh(bezelGeo, bezelMat);
     bezel.position.set(0, 0.52, -0.77);
     this.chassisGroup.add(bezel);
 
-    // Glossy black active display screen with dynamic eye texture
+    // Glossy black active OLED display screen with dynamic eye texture
     const screenGeo = new THREE.PlaneGeometry(0.72, 0.26);
     const screen = new THREE.Mesh(screenGeo, this.eyeMaterial);
     screen.position.set(0, 0.52, -0.801);

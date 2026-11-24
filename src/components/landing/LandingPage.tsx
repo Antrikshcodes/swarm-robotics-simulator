@@ -6,8 +6,10 @@ import { AnimatePresence } from "framer-motion";
 import { LandingNavigation } from "./LandingNavigation";
 import { SectionIndicator } from "./SectionIndicator";
 import { HeroSection } from "./HeroSection";
-import { PlatformSection } from "./PlatformSection";
-import { FleetSection } from "./FleetSection";
+import { RobotRevealSection } from "./RobotRevealSection";
+import { WarehouseEnvironmentSection } from "./WarehouseEnvironmentSection";
+import { CoordinationProblemSection } from "./CoordinationProblemSection";
+import { SwarmSolutionSection } from "./SwarmSolutionSection";
 import { TechnologySection } from "./TechnologySection";
 import { FinalCTA } from "./FinalCTA";
 import { WarehouseScene } from "./WarehouseScene";
@@ -34,8 +36,16 @@ export function LandingPage() {
       const progress = totalHeight > 0 ? Math.min(Math.max(scrollY / totalHeight, 0), 1) : 0;
       setScrollProgress(progress);
 
-      // Section calculation based on scroll offset
-      const sections = ["hero", "platform", "fleet", "technology", "final"];
+      // Section calculation based on scroll offset across all 7 scenes
+      const sections = [
+        "hero",
+        "robot-reveal",
+        "warehouse-scale",
+        "coordination-conflict",
+        "swarm-solution",
+        "technology",
+        "final",
+      ];
       const sectionElements = sections.map((id) => document.getElementById(id));
       const currentScroll = scrollY + window.innerHeight * 0.35;
 
@@ -79,15 +89,15 @@ export function LandingPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen w-full bg-[#EFECE6] text-[#141414] overflow-x-hidden">
+    <div className="relative min-h-screen w-full bg-[#080B0D] text-[#F2F4F3] overflow-x-hidden">
       {/* 1. Subtle Editorial Vertical Grid Lines (17%, 50%, 83%) */}
       <div
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none z-0 flex justify-between px-0"
       >
-        <div className="absolute top-0 bottom-0 left-[17%] w-px bg-[#141414]/[0.05]" />
-        <div className="absolute top-0 bottom-0 left-[50%] w-px bg-[#141414]/[0.05]" />
-        <div className="absolute top-0 bottom-0 left-[83%] w-px bg-[#141414]/[0.05]" />
+        <div className="absolute top-0 bottom-0 left-[17%] w-px bg-white/[0.04]" />
+        <div className="absolute top-0 bottom-0 left-[50%] w-px bg-white/[0.04]" />
+        <div className="absolute top-0 bottom-0 left-[83%] w-px bg-white/[0.04]" />
       </div>
 
       {/* 2. Persistent Fullscreen 3D Scene */}
@@ -104,31 +114,37 @@ export function LandingPage() {
         isScrolled={scrollProgress > 0.02}
       />
 
-      {/* 4. Desktop Right-Side Section Rail Indicator */}
+      {/* 4. Desktop Right-Side 7-Scene Rail Indicator */}
       <SectionIndicator
         activeSection={activeSection}
         onSectionClick={scrollToSection}
       />
 
-      {/* 5. Editorial Content Sections */}
+      {/* 5. Editorial Content: The 7 Continuous Scenes */}
       <main className="relative z-10 w-full flex flex-col">
-        {/* Section 1: Hero */}
+        {/* Scene 01: The Introduction */}
         <HeroSection
           onEnterWarehouse={handleEnterWarehouse}
-          onExplore={() => scrollToSection("platform")}
+          onExplore={() => scrollToSection("robot-reveal")}
           isWebGLSupported={isWebGLSupported}
         />
 
-        {/* Section 2: Platform */}
-        <PlatformSection />
+        {/* Scene 02: The Robot Reveal */}
+        <RobotRevealSection />
 
-        {/* Section 3: Fleet */}
-        <FleetSection />
+        {/* Scene 03: The Warehouse Scale */}
+        <WarehouseEnvironmentSection />
 
-        {/* Section 4: Technology */}
+        {/* Scene 04: The Coordination Problem (Narrow Aisle) */}
+        <CoordinationProblemSection />
+
+        {/* Scene 05: The SWARM Solution */}
+        <SwarmSolutionSection />
+
+        {/* Scene 06: Technology & Architecture */}
         <TechnologySection />
 
-        {/* Section 5: Final CTA */}
+        {/* Scene 07: The Final CTA */}
         <FinalCTA
           onEnterWarehouse={handleEnterWarehouse}
           isTransitioning={isEnteringWarehouse}

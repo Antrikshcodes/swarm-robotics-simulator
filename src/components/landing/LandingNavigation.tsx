@@ -45,7 +45,7 @@ export function LandingNavigation({
       transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "bg-[#EFECE6]/85 backdrop-blur-md border-b border-[#141414]/9 py-3 shadow-xs"
+          ? "bg-[#080B0D]/85 backdrop-blur-md border-b border-white/[0.08] py-3.5 shadow-lg shadow-black/40"
           : "bg-transparent py-5"
       }`}
     >
@@ -56,7 +56,7 @@ export function LandingNavigation({
           className="group flex items-center gap-3 outline-none focus-visible:ring-2 focus-visible:ring-[#40C8E8]"
         >
           {/* Custom geometric logo mark */}
-          <div className="relative size-8 flex items-center justify-center rounded-lg bg-[#141414] text-[#EFECE6] shadow-sm transition-transform group-hover:scale-105">
+          <div className="relative size-8 flex items-center justify-center rounded-lg bg-[#121A1E] border border-white/10 text-[#F2F4F3] shadow-inner transition-transform group-hover:scale-105">
             <svg
               viewBox="0 0 24 24"
               className="size-5 fill-none stroke-current stroke-[2.2]"
@@ -72,10 +72,10 @@ export function LandingNavigation({
             </svg>
           </div>
           <div className="flex flex-col">
-            <span className="font-mono text-sm font-bold tracking-[0.22em] text-[#141414] leading-none">
+            <span className="font-display font-bold tracking-[0.2em] text-sm text-[#F2F4F3] leading-none">
               SWARM
             </span>
-            <span className="font-mono text-[9.5px] tracking-wider text-[#141414]/50 leading-tight mt-0.5">
+            <span className="font-mono text-[9px] tracking-widest text-[#89969C] leading-tight mt-0.5">
               ROBOTICS ARENA
             </span>
           </div>
@@ -84,19 +84,20 @@ export function LandingNavigation({
         {/* Center Editorial Navigation Links */}
         <nav className="hidden md:flex items-center gap-8">
           {[
-            { label: "PLATFORM", target: "platform" },
-            { label: "FLEET", target: "fleet" },
+            { label: "ROBOT", target: "robot-reveal" },
+            { label: "WAREHOUSE", target: "warehouse-scale" },
+            { label: "CONFLICT", target: "coordination-conflict" },
+            { label: "SOLUTION", target: "swarm-solution" },
             { label: "TECHNOLOGY", target: "technology" },
-            { label: "ABOUT", target: "about" },
           ].map((item) => (
             <button
               key={item.label}
               type="button"
               onClick={() => scrollToSection(item.target)}
-              className="group relative font-mono text-xs tracking-[0.16em] uppercase text-[#141414]/75 hover:text-[#141414] transition-colors py-1 cursor-pointer"
+              className="group relative font-mono text-xs tracking-[0.16em] uppercase text-[#89969C] hover:text-[#F2F4F3] transition-colors py-1 cursor-pointer"
             >
               <span>{item.label}</span>
-              <span className="absolute bottom-0 left-0 w-0 h-[1.5px] bg-[#141414] transition-all duration-200 group-hover:w-full" />
+              <span className="absolute bottom-0 left-0 w-0 h-[1.5px] bg-[#40C8E8] transition-all duration-200 group-hover:w-full" />
             </button>
           ))}
         </nav>
@@ -104,12 +105,12 @@ export function LandingNavigation({
         {/* Right Action Area */}
         <div className="flex items-center gap-4">
           {/* Status Indicator */}
-          <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#141414]/10 bg-[#141414]/5 font-mono text-[10.5px] tracking-wider text-[#141414]/80">
+          <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-[#121A1E] font-mono text-[10.5px] tracking-wider text-[#89969C]">
             <span className="relative flex size-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#B7F34A] opacity-75" />
               <span className="relative inline-flex rounded-full size-2 bg-[#B7F34A]" />
             </span>
-            <span>SYSTEM: ONLINE</span>
+            <span className="text-[#F2F4F3]">SYSTEM: ONLINE</span>
           </div>
 
           {/* Primary ENTER WAREHOUSE Button */}
@@ -117,7 +118,7 @@ export function LandingNavigation({
             type="button"
             disabled={isTransitioning}
             onClick={onEnterWarehouse}
-            className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#141414] text-[#EFECE6] font-mono text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:bg-[#20272B] hover:shadow-lg hover:shadow-[#141414]/15 active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/10 bg-[#192329] text-[#F2F4F3] font-mono text-xs font-semibold tracking-wider uppercase transition-all duration-300 hover:bg-[#121A1E] hover:border-[#40C8E8]/50 hover:shadow-lg hover:shadow-[#40C8E8]/10 active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             <span>ENTER WAREHOUSE</span>
             <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 text-[#40C8E8]" />
@@ -128,7 +129,7 @@ export function LandingNavigation({
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle menu"
-            className="md:hidden p-2 text-[#141414] hover:bg-[#141414]/5 rounded-lg"
+            className="md:hidden p-2 text-[#F2F4F3] hover:bg-white/5 rounded-lg border border-white/10"
           >
             {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
@@ -142,42 +143,49 @@ export function LandingNavigation({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-b border-[#141414]/10 bg-[#EFECE6] px-6 py-6"
+            className="md:hidden border-b border-white/10 bg-[#080B0D]/95 backdrop-blur-xl px-6 py-6"
           >
-            <div className="flex flex-col gap-4 font-mono text-sm tracking-wider">
+            <div className="flex flex-col gap-4 font-mono text-xs tracking-wider">
               <button
                 type="button"
-                onClick={() => scrollToSection("platform")}
-                className="text-left text-[#141414]/80 hover:text-[#141414] py-1"
+                onClick={() => scrollToSection("robot-reveal")}
+                className="text-left text-[#89969C] hover:text-[#F2F4F3] py-1.5"
               >
-                01 // PLATFORM
+                01 {"//"} THE ROBOT REVEAL
               </button>
               <button
                 type="button"
-                onClick={() => scrollToSection("fleet")}
-                className="text-left text-[#141414]/80 hover:text-[#141414] py-1"
+                onClick={() => scrollToSection("warehouse-scale")}
+                className="text-left text-[#89969C] hover:text-[#F2F4F3] py-1.5"
               >
-                02 // FLEET
+                02 {"//"} WAREHOUSE SCALE
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection("coordination-conflict")}
+                className="text-left text-[#89969C] hover:text-[#F2F4F3] py-1.5"
+              >
+                03 {"//"} CONFLICT RESOLUTION
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection("swarm-solution")}
+                className="text-left text-[#89969C] hover:text-[#F2F4F3] py-1.5"
+              >
+                04 {"//"} SWARM SOLUTION
               </button>
               <button
                 type="button"
                 onClick={() => scrollToSection("technology")}
-                className="text-left text-[#141414]/80 hover:text-[#141414] py-1"
+                className="text-left text-[#89969C] hover:text-[#F2F4F3] py-1.5"
               >
-                03 // TECHNOLOGY
+                05 {"//"} ARCHITECTURE & TECH
               </button>
-              <button
-                type="button"
-                onClick={() => scrollToSection("about")}
-                className="text-left text-[#141414]/80 hover:text-[#141414] py-1"
-              >
-                04 // ABOUT
-              </button>
-              <div className="pt-2 border-t border-[#141414]/10">
+              <div className="pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={onEnterWarehouse}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[#141414] text-[#EFECE6] font-mono text-xs font-semibold tracking-wider"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#192329] border border-[#40C8E8]/40 text-[#F2F4F3] font-mono text-xs font-semibold tracking-wider"
                 >
                   <span>ENTER WAREHOUSE</span>
                   <ArrowUpRight className="size-4 text-[#40C8E8]" />

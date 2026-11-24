@@ -58,10 +58,10 @@ export function WarehouseScene({
     const height = container.clientHeight || window.innerHeight;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0xefece6, 0.025);
+    scene.fog = new THREE.FogExp2(0x080b0d, 0.035);
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
-    camera.position.set(2.2, 1.6, 4.4);
+    camera.position.set(2.0, 1.5, 4.4);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -78,37 +78,41 @@ export function WarehouseScene({
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.15;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     container.appendChild(renderer.domElement);
 
-    // 3. Lights
-    const ambientLight = new THREE.AmbientLight(0xfff8ee, 1.2);
+    // 3. Dark Industrial Cinematic Lights
+    const ambientLight = new THREE.AmbientLight(0x0d1419, 1.8);
     scene.add(ambientLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
     keyLight.position.set(6, 9, 5);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
     keyLight.shadow.camera.near = 0.5;
     keyLight.shadow.camera.far = 25;
-    keyLight.shadow.camera.left = -5;
-    keyLight.shadow.camera.right = 5;
-    keyLight.shadow.camera.top = 5;
-    keyLight.shadow.camera.bottom = -5;
+    keyLight.shadow.camera.left = -6;
+    keyLight.shadow.camera.right = 6;
+    keyLight.shadow.camera.top = 6;
+    keyLight.shadow.camera.bottom = -6;
     keyLight.shadow.bias = -0.0005;
     scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0xbad2e0, 0.75);
+    const fillLight = new THREE.DirectionalLight(0x192733, 1.4);
     fillLight.position.set(-5, 4, -3);
     scene.add(fillLight);
 
-    const rimLight = new THREE.PointLight(0x40c8e8, 1.2, 12);
-    rimLight.position.set(0, 0.2, 1.5);
+    const rimLight = new THREE.PointLight(0x40c8e8, 2.6, 16);
+    rimLight.position.set(0, 0.3, 1.8);
     scene.add(rimLight);
+
+    const limeAccent = new THREE.PointLight(0xb7f34a, 1.6, 12);
+    limeAccent.position.set(-2, 0.5, -1);
+    scene.add(limeAccent);
 
     // 4. Instantiate Models
     const robot = new WarehouseRobot();
@@ -125,43 +129,59 @@ export function WarehouseScene({
     };
     window.addEventListener("mousemove", onPointerMove, { passive: true });
 
-    // 6. Camera States for Choreography
+    // 6. Camera States for 7-Scene Continuous Choreography
     const cameraStates = [
-      // 0. Hero (scroll ~0.0)
+      // Scene 01: The Introduction (Hero, scroll ~0.0)
       {
-        camPos: new THREE.Vector3(2.4, 1.6, 4.4),
-        lookAt: new THREE.Vector3(0.55, 0.75, 0),
-        robotPos: new THREE.Vector3(0.55, 0, 0),
+        camPos: new THREE.Vector3(2.1, 1.5, 4.4),
+        lookAt: new THREE.Vector3(0.5, 0.75, 0),
+        robotPos: new THREE.Vector3(0.5, 0, 0),
         robotRotY: -0.42,
         expression: "neutral" as RobotExpression,
       },
-      // 1. Platform (scroll ~0.25)
+      // Scene 02: The Robot Reveal (scroll ~0.16)
       {
-        camPos: new THREE.Vector3(-1.3, 1.25, 3.1),
-        lookAt: new THREE.Vector3(-0.05, 0.8, 0),
-        robotPos: new THREE.Vector3(-0.05, 0, 0),
-        robotRotY: 0.36,
+        camPos: new THREE.Vector3(-1.5, 1.15, 2.8),
+        lookAt: new THREE.Vector3(-0.1, 0.75, 0),
+        robotPos: new THREE.Vector3(-0.1, 0, 0),
+        robotRotY: 0.52,
         expression: "scanning" as RobotExpression,
       },
-      // 2. Fleet (scroll ~0.50)
+      // Scene 03: The Warehouse Reveal (scroll ~0.33)
       {
-        camPos: new THREE.Vector3(0.0, 3.6, 5.5),
-        lookAt: new THREE.Vector3(0, 0.35, 0),
+        camPos: new THREE.Vector3(0.2, 4.2, 6.2),
+        lookAt: new THREE.Vector3(0, 0.4, 0),
         robotPos: new THREE.Vector3(0, 0, 0),
         robotRotY: 0.0,
         expression: "neutral" as RobotExpression,
       },
-      // 3. Technology (scroll ~0.75)
+      // Scene 04: The Coordination Problem (Narrow Aisle, scroll ~0.50)
       {
-        camPos: new THREE.Vector3(2.6, 1.9, 3.7),
-        lookAt: new THREE.Vector3(-0.2, 0.75, 0),
+        camPos: new THREE.Vector3(1.9, 2.3, 3.8),
+        lookAt: new THREE.Vector3(0.4, 0.6, 0),
+        robotPos: new THREE.Vector3(0.4, 0, 0),
+        robotRotY: -0.32,
+        expression: "scanning" as RobotExpression,
+      },
+      // Scene 05: The SWARM Solution (Multi-Robot Fleet, scroll ~0.66)
+      {
+        camPos: new THREE.Vector3(-2.2, 2.4, 4.2),
+        lookAt: new THREE.Vector3(-0.2, 0.5, 0),
         robotPos: new THREE.Vector3(-0.2, 0, 0),
+        robotRotY: 0.38,
+        expression: "neutral" as RobotExpression,
+      },
+      // Scene 06: The Technology (4D Reservation Matrix, scroll ~0.83)
+      {
+        camPos: new THREE.Vector3(2.6, 2.0, 3.5),
+        lookAt: new THREE.Vector3(-0.1, 0.75, 0),
+        robotPos: new THREE.Vector3(-0.1, 0, 0),
         robotRotY: -0.65,
         expression: "scanning" as RobotExpression,
       },
-      // 4. Final CTA (scroll ~1.0)
+      // Scene 07: The Final CTA (Heroic Frontal, scroll ~1.0)
       {
-        camPos: new THREE.Vector3(0.0, 1.15, 3.2),
+        camPos: new THREE.Vector3(0.0, 1.15, 3.1),
         lookAt: new THREE.Vector3(0, 0.75, 0),
         robotPos: new THREE.Vector3(0, 0, 0),
         robotRotY: 0.0,

@@ -24,12 +24,12 @@ export function Stat({
     <div className={cn("flex min-w-0 flex-col gap-2", className)}>
       <div className="flex items-center gap-1.5">
         {icon ? <span className="text-text-dim [&_svg]:size-3.5">{icon}</span> : null}
-        <span className="label-caps truncate">{label}</span>
+        <span className="font-display label-caps truncate text-[11px] font-semibold">{label}</span>
       </div>
       <div className="flex items-baseline gap-1">
         <span
           className={cn(
-            "tabular font-mono text-[22px] leading-none font-medium tracking-tight",
+            "tabular font-mono text-[24px] leading-none font-semibold tracking-tight",
             tone ? TONE_TEXT[tone] : "text-foreground",
           )}
         >

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -10,19 +11,26 @@
  * (see src/lib/canvas-theme.ts), so never duplicate hex values in TS.
  */
 :root {
-  --font-geist-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
-  --font-geist-mono: "SFMono-Regular", Menlo, Consolas, monospace;
-  /* Core palette (DESIGN_SYSTEM.md) */
-  --swarm-bg: #090d10;
-  --swarm-sidebar: #11191e;
-  --swarm-surface: #19242a;
-  --swarm-surface-raised: #1f2c33;
-  --swarm-surface-sunken: #0d1317;
-  --swarm-line: #213039;
-  --swarm-line-strong: #2d3e48;
-  --swarm-text: #e3e9ec;
-  --swarm-text-secondary: #82919a;
-  --swarm-text-dim: #55646d;
+  --font-space-grotesk: "Space Grotesk", "Sora", sans-serif;
+  --font-inter: "Inter", "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-jetbrains-mono: "JetBrains Mono", "Geist Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --font-display: var(--font-space-grotesk);
+  --font-geist-sans: var(--font-inter);
+  --font-geist-mono: var(--font-jetbrains-mono);
+
+  /* Antriksh Dark Premium Palette */
+  --swarm-bg: #080b0d;
+  --swarm-bg-secondary: #0d1215;
+  --swarm-sidebar: #0d1215;
+  --swarm-surface: #121a1e;
+  --swarm-surface-raised: #192329;
+  --swarm-surface-sunken: #06080a;
+  --swarm-line: rgba(255, 255, 255, 0.09);
+  --swarm-line-strong: rgba(255, 255, 255, 0.16);
+  --swarm-text: #f2f4f3;
+  --swarm-text-secondary: #89969c;
+  --swarm-text-dim: #58666c;
 
   --swarm-lime: #b7f34a;
   --swarm-cyan: #40c8e8;
@@ -95,7 +103,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
+  --font-heading: var(--font-display);
+  --font-display: var(--font-display);
 
   /* SWARM utilities: bg-surface, text-lime, border-line, … */
   --color-surface: var(--swarm-surface);
