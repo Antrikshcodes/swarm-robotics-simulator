@@ -1,5 +1,9 @@
 import type {
   DeadlockStatus,
+  FailureStatus,
+  FailureType,
+  RecoveryTaskStatus,
+  RescueOutcome,
   EventSeverity,
   RecoveryOutcome,
   WaitClass,
@@ -56,7 +60,7 @@ export const ROBOT_STATUS: Record<RobotStatus, { label: string; tone: Tone }> = 
   charging: { label: "Charging", tone: "lime" },
   idle: { label: "Idle", tone: "neutral" },
   failed: { label: "Failed", tone: "red" },
-  recovering: { label: "Recovering", tone: "amber" },
+  recovering: { label: "Restoring", tone: "amber" },
 };
 
 export const ROBOT_ACTION: Record<RobotAction, string> = {
@@ -70,6 +74,9 @@ export const ROBOT_ACTION: Record<RobotAction, string> = {
   unloading: "Unloading",
   charging: "Charging",
   halted: "Halted",
+  "travel-to-recovery": "Heading to recover a package",
+  handover: "Taking custody (handover)",
+  restoring: "Restoring to service",
 };
 
 export const MISSION_STATE: Record<MissionState, { label: string; tone: Tone }> = {
@@ -90,6 +97,7 @@ export const PACKAGE_STATE: Record<PackageState, { label: string; tone: Tone }> 
   reserved: { label: "Reserved", tone: "cyan" },
   "picked-up": { label: "Picked up", tone: "lime" },
   "in-transit": { label: "In transit", tone: "lime" },
+  "recovery-required": { label: "Recovery required", tone: "red" },
   delivered: { label: "Delivered", tone: "neutral" },
 };
 
@@ -137,4 +145,37 @@ export const STATION_KIND: Record<StationKind, { short: string; label: string }>
   pickup: { short: "PK", label: "Pickup" },
   dropoff: { short: "DO", label: "Drop-off" },
   charger: { short: "CH", label: "Charger" },
+};
+
+/** Robot failure types (Mission 005). */
+export const FAILURE_TYPE: Record<FailureType, { label: string; short: string }> = {
+  motor: { label: "Motor failure", short: "Motor" },
+  battery: { label: "Battery failure", short: "Battery" },
+  navigation: { label: "Navigation failure", short: "Navigation" },
+  communication: { label: "Communication loss", short: "Comms" },
+  "emergency-stop": { label: "Emergency stop", short: "E-stop" },
+};
+
+export const FAILURE_STATUS: Record<FailureStatus, { label: string; tone: Tone }> = {
+  active: { label: "Failed", tone: "red" },
+  restoring: { label: "Restoring", tone: "amber" },
+  restored: { label: "Restored", tone: "lime" },
+};
+
+export const RECOVERY_TASK_STATUS: Record<RecoveryTaskStatus, { label: string; tone: Tone }> = {
+  pending: { label: "Recovery required", tone: "red" },
+  "en-route": { label: "Rescuer en route", tone: "cyan" },
+  handover: { label: "Handover", tone: "cyan" },
+  completed: { label: "Recovered", tone: "lime" },
+  failed: { label: "Recovery failed", tone: "red" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+};
+
+export const RESCUE_OUTCOME: Record<RescueOutcome, { label: string; tone: Tone }> = {
+  "in-progress": { label: "In progress", tone: "cyan" },
+  "handed-over": { label: "Handed over", tone: "lime" },
+  timeout: { label: "Timed out", tone: "amber" },
+  "rescuer-failed": { label: "Rescuer failed", tone: "red" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  "holder-restored": { label: "Holder restored", tone: "lime" },
 };

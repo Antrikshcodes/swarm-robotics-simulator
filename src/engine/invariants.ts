@@ -24,6 +24,10 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
     occupied.set(key, r.id);
     if (manhattan(r.previousPosition, r.position) > 1) v.push(`${r.id} moved more than one cell in a tick`);
     if (r.battery < 0 || r.battery > 100) v.push(`${r.id} battery out of range: ${r.battery}`);
+    // A failed (or restoring) robot never moves and never works on an active mission.
+    if ((r.status === "failed" || r.status === "recovering") && !samePoint(r.position, r.previousPosition)) {
+      v.push(`${r.id} moved while ${r.status}`);
+    }
   }
   for (let i = 0; i < robots.length; i += 1) {
     for (let j = i + 1; j < robots.length; j += 1) {
@@ -41,7 +45,7 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
 
   // --- Package custody
   for (const pkg of packages) {
-    const carried = pkg.state === "picked-up" || pkg.state === "in-transit";
+    const carried = pkg.state === "picked-up" || pkg.state === "in-transit" || pkg.state === "recovery-required";
     if (pkg.state === "available" && pkg.holderRobotId !== null) v.push(`${pkg.id} is available but held by ${pkg.holderRobotId}`);
     if ((pkg.state === "reserved" || carried) && pkg.holderRobotId === null) v.push(`${pkg.id} is ${pkg.state} with no holder`);
     if (pkg.holderRobotId !== null && !robotById.has(pkg.holderRobotId)) v.push(`${pkg.id} held by unknown robot ${pkg.holderRobotId}`);
@@ -49,6 +53,18 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
       const holder = robotById.get(pkg.holderRobotId ?? "");
       if (holder && holder.packageId !== pkg.id) v.push(`${pkg.id} is carried by ${holder.id} but the robot does not hold it`);
       if (pkg.location.kind !== "robot" || pkg.location.robotId !== pkg.holderRobotId) v.push(`${pkg.id} location disagrees with holder`);
+    }
+    if (pkg.state === "recovery-required") {
+      const holder = robotById.get(pkg.holderRobotId ?? "");
+      if (!pkg.recovery) v.push(`${pkg.id} needs recovery but has no recovery record`);
+      else if (pkg.recovery.failedRobotId !== pkg.holderRobotId) v.push(`${pkg.id} recovery record disagrees with its holder`);
+      if (holder && holder.status !== "failed" && holder.status !== "recovering") {
+        v.push(`${pkg.id} needs recovery but its holder ${holder.id} is ${holder.status}`);
+      }
+      const rescuer = pkg.recovery?.rescuerId ? robotById.get(pkg.recovery.rescuerId) : undefined;
+      if (rescuer && rescuer.packageId !== null) v.push(`${pkg.id} rescuer ${rescuer.id} already carries ${rescuer.packageId}`);
+    } else if (pkg.recovery !== null) {
+      v.push(`${pkg.id} is ${pkg.state} but still has a recovery record`);
     }
     if (pkg.state === "delivered") {
       if (pkg.holderRobotId !== null) v.push(`${pkg.id} is delivered but still held`);
@@ -62,7 +78,7 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
     if (!r.packageId) continue;
     const pkg = packageById.get(r.packageId);
     if (!pkg) v.push(`${r.id} carries unknown package ${r.packageId}`);
-    else if (pkg.holderRobotId !== r.id || (pkg.state !== "picked-up" && pkg.state !== "in-transit")) {
+    else if (pkg.holderRobotId !== r.id || (pkg.state !== "picked-up" && pkg.state !== "in-transit" && pkg.state !== "recovery-required")) {
       v.push(`${r.id} claims ${r.packageId} but custody says ${pkg.state}/${pkg.holderRobotId ?? "none"}`);
     }
     const other = carriers.get(r.packageId);
@@ -85,6 +101,7 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
       else {
         const robot = robotById.get(m.robotId);
         if (!robot) v.push(`${m.id} assigned to unknown robot ${m.robotId}`);
+        else if (robot.status === "failed" || robot.status === "recovering") v.push(`${m.id} is ${m.state} on ${robot.status} ${robot.id}`);
         else if (robot.missionId !== m.id) v.push(`${m.id} assigned to ${m.robotId}, which is working on ${robot.missionId ?? "nothing"}`);
         const other = activeByRobot.get(m.robotId);
         if (other) v.push(`${m.robotId} has two active missions: ${other}, ${m.id}`);
@@ -97,7 +114,7 @@ export function checkInvariants(snapshot: SimulationSnapshot): string[] {
     const m = missions.find((x) => x.id === r.missionId);
     if (!m) v.push(`${r.id} references unknown mission ${r.missionId}`);
     else if (m.robotId !== r.id) v.push(`${r.id} references ${m.id}, which belongs to ${m.robotId ?? "nobody"}`);
-    else if (!isActiveMission(m.state) && !(r.status === "failed" && m.state === "recovery-required")) {
+    else if (!isActiveMission(m.state) && !((r.status === "failed" || r.status === "recovering") && m.state === "recovery-required")) {
       v.push(`${r.id} still references ${m.state} mission ${m.id}`);
     }
   }

@@ -183,6 +183,28 @@ export class Coordinator {
     return [...affected].sort();
   }
 
+  /**
+   * A failed robot was restored: it keeps owning its cell (hold) and plans
+   * normally again from the next tick.
+   */
+  restore(robotId: string, cell: number, tick: number): void {
+    const s = this.robots.get(robotId);
+    if (!s) return;
+    this.table.setHold(robotId, cell, tick);
+    s.positions = [cell];
+    s.startTick = tick;
+    s.status = null;
+    s.state = "holding";
+    s.needsPlan = true;
+    s.waitingFor = null;
+    s.waitStreak = 0;
+  }
+
+  /** Invalidate every mobile robot's plan (e.g. an aisle reopened: shorter routes may exist). */
+  invalidateAll(): void {
+    for (const s of this.robots.values()) if (s.state !== "failed") s.needsPlan = true;
+  }
+
   // --------------------------------------------------------------- planning
 
   /**

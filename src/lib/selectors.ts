@@ -47,7 +47,7 @@ export function deriveIncidents(snapshot: SimulationSnapshot): Incident[] {
 
   for (const robot of snapshot.robots) {
     if (robot.status === "failed" || robot.status === "recovering") {
-      const opened = lastEvent(snapshot.events, "robot-failed", robot.id);
+      const opened = lastEvent(snapshot.events, "robot_failed", robot.id);
       const mission = snapshot.missions.find((m) => m.robotId === robot.id && m.state === "recovery-required");
       const pkg = mission ? snapshot.packages.find((p) => p.id === mission.packageId) : undefined;
       incidents.push({
@@ -163,7 +163,7 @@ export function deriveIncidents(snapshot: SimulationSnapshot): Incident[] {
         open: false,
       });
     }
-    if (event.kind === "aisle-closed" && event.closureId && !openClosures.has(event.closureId)) {
+    if (event.kind === "aisle_closed" && event.closureId && !openClosures.has(event.closureId)) {
       incidents.push({
         id: `INC-C-${event.closureId}-${event.seq}`,
         kind: "aisle-closure",

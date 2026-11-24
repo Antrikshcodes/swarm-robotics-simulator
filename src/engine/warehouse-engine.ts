@@ -2,6 +2,7 @@ import type {
   Closure,
   CoordinationSnapshot,
   EventSeverity,
+  FailureType,
   GridPoint,
   Heading,
   Mission,
@@ -12,12 +13,14 @@ import type {
   RobotAction,
   RobotState,
   RobotStatus,
+  RouteEvent,
   SimEvent,
   SimEventKind,
   SimulationSnapshot,
   Station,
 } from "../types/simulation";
 import {
+  FAILURE_TYPES,
   isWorldCommand,
   type CommandResult,
   type EngineCommand,
@@ -27,14 +30,18 @@ import {
 import { InvariantViolation, err, ok, type Result } from "./core/result";
 import { Prng } from "./core/prng";
 import {
-  annotateCustody,
+  assignRescuer,
   createPackage,
   deliverPackage,
   departWithPackage,
+  markRecoveryRequired,
   pickUpPackage,
   releaseReservation,
   reservePackage,
+  resumeCustody,
+  transferCustody,
 } from "./custody/package-custody";
+import { FAILURE_LABEL, RESTORE_TICKS, RecoveryManager, type RecoveryOptions, type RecoveryPort } from "./recovery/recovery-manager";
 import { checkInvariants } from "./invariants";
 import { BLOCKED_ALERT_TICKS, LOW_BATTERY_THRESHOLD, computeMetrics } from "./metrics";
 import { createMission, isActiveMission, transitionMission } from "./missions/mission-lifecycle";
@@ -45,7 +52,7 @@ import type { PlanningGrid } from "./coordination/space-time-planner";
 import { validateRobotTransition } from "./robots/robot-lifecycle";
 import type { CompiledScenario, MissionSpec, RobotSpec } from "./scenario";
 import { getCompiledScenario, SCENARIOS } from "./scenarios";
-import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, samePoint, stationAt } from "./world/layout";
+import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, manhattan, samePoint, stationAt } from "./world/layout";
 
 /**
  * The simulation source the UI talks to. Implemented by WarehouseEngine;
@@ -66,6 +73,8 @@ export interface EngineOptions {
   readonly checkInvariants?: boolean;
   /** Deadlock detection / recovery settings (recovery on by default). */
   readonly deadlock?: DeadlockOptions;
+  /** Package-recovery settings after robot failures (auto-dispatch on by default). */
+  readonly recovery?: RecoveryOptions;
 }
 
 // ---------------------------------------------------------------- tuning
@@ -85,6 +94,10 @@ const DRAIN_MOVE = 0.04;
 const DRAIN_WORK = 0.01;
 const DRAIN_IDLE = 0.004;
 const CHARGE_RATE = 1;
+/** Movement priority bonus for a robot on its way to recover a stranded package. */
+const RESCUE_BONUS = 3;
+/** Ticks a route change stays visible on the robot (routeEvent). */
+const ROUTE_EVENT_TTL = 10;
 
 // --------------------------------------------------------------- runtime
 
@@ -108,10 +121,15 @@ interface RobotRuntime {
   noPathAnnounced: boolean;
   lowBatteryFlag: boolean;
   note: string | null;
+  /** Package-recovery job: go to `approachCell` beside the failed holder and take over `packageId`. */
+  rescue: { taskId: string; packageId: string; approachCell: number } | null;
+  /** Remaining ticks of a restoration (status "recovering"). */
+  restoreTicks: number;
+  routeEvent: RouteEvent | null;
   stats: { movingTicks: number; waitingTicks: number; busyTicks: number; distance: number; deliveries: number; replans: number };
 }
 
-type TargetKind = "pickup" | "dropoff" | "home" | "charger" | "hold";
+type TargetKind = "pickup" | "dropoff" | "home" | "charger" | "hold" | "rescue";
 
 interface Target {
   readonly kind: TargetKind;
@@ -181,6 +199,12 @@ export class WarehouseEngine implements SimulationSource {
   private freshYields = new Set<string>();
   /** Bumped whenever the warehouse changes in a way that could unblock a failed recovery. */
   private worldVersion = 0;
+  private readonly recoveryOptions: RecoveryOptions;
+  private recovery!: RecoveryManager;
+  /** Robots whose route was invalidated by a world change, with the cause; reported once replanned. */
+  private pendingReplan = new Map<string, string>();
+  /** Missions requeued because their robot failed: mission → failed robot. */
+  private reassignFrom = new Map<string, string>();
   private events: SimEvent[] = [];
   private movements: MovementRecord[] = [];
   private deliveryTicks: number[] = [];
@@ -196,6 +220,7 @@ export class WarehouseEngine implements SimulationSource {
     this.scenario = scenario;
     this.checking = options.checkInvariants ?? process.env.NODE_ENV !== "production";
     this.deadlockOptions = options.deadlock ?? {};
+    this.recoveryOptions = options.recovery ?? {};
     this.initialise();
     this.verify();
   }
@@ -336,6 +361,9 @@ export class WarehouseEngine implements SimulationSource {
       noPathAnnounced: false,
       lowBatteryFlag: spec.battery < LOW_BATTERY_THRESHOLD,
       note: null,
+      rescue: null,
+      restoreTicks: 0,
+      routeEvent: null,
       stats: { movingTicks: 0, waitingTicks: 0, busyTicks: 0, distance: 0, deliveries: 0, replans: 0 },
     }));
 
@@ -365,6 +393,9 @@ export class WarehouseEngine implements SimulationSource {
     this.yields = new Map();
     this.freshYields = new Set();
     this.worldVersion = 0;
+    this.recovery = new RecoveryManager(this.recoveryOptions);
+    this.pendingReplan = new Map();
+    this.reassignFrom = new Map();
 
     this.emit("scenario-loaded", "info", `Scenario "${definition.name}" loaded`);
     for (const job of definition.missions) this.createMissionInternal(job);
@@ -380,6 +411,8 @@ export class WarehouseEngine implements SimulationSource {
       if (!result.ok) this.emit("robot-no-path", "warning", `Scheduled ${entry.command.type} failed: ${result.error.message}`);
     }
     this.runFeed();
+    // Stranded packages get a rescuer before new missions take the free robots.
+    this.runRecovery();
     this.assignMissions();
 
     // Phase 1 — station work, goals and arrivals (no movement yet).
@@ -404,6 +437,7 @@ export class WarehouseEngine implements SimulationSource {
       })),
     );
     this.freshYields.clear();
+    this.reportReplans(modes);
 
     // Phase 3 — commit-time conflict check for the whole fleet at once.
     const resolution = resolveMoves(intents);
@@ -440,6 +474,14 @@ export class WarehouseEngine implements SimulationSource {
   private prepare(robot: RobotRuntime): CoordMode {
     this.currentTarget.delete(robot.spec.id);
     if (robot.status === "failed") return "failed";
+    if (robot.status === "recovering") {
+      robot.restoreTicks -= 1;
+      if (robot.restoreTicks > 0) {
+        robot.note = `Restoring · ${robot.restoreTicks} tick${robot.restoreTicks === 1 ? "" : "s"} left`;
+        return "failed";
+      }
+      this.completeRestore(robot);
+    }
 
     if (robot.dwell > 0) {
       robot.dwell -= 1;
@@ -489,6 +531,7 @@ export class WarehouseEngine implements SimulationSource {
   /** Ticks the robot will handle at its current goal station, if it is one. */
   private goalDwell(robot: RobotRuntime): number | undefined {
     const target = this.currentTarget.get(robot.spec.id);
+    if (target?.kind === "rescue") return this.recovery.handoverTicks;
     if (target?.kind === "pickup") return this.scenario.definition.handling.loadTicks;
     if (target?.kind === "dropoff") return this.scenario.definition.handling.unloadTicks;
     return undefined;
@@ -496,7 +539,11 @@ export class WarehouseEngine implements SimulationSource {
 
   /** Movement priority: mission urgency, then carrying, then aging while waiting. */
   private priorityOf(robot: RobotRuntime): number {
-    if (robot.status === "failed") return 0;
+    if (robot.status === "failed" || robot.status === "recovering") return 0;
+    if (robot.rescue) {
+      const stranded = this.missions.get(this.pkg(robot.rescue.packageId).missionId);
+      return (stranded ? MISSION_WEIGHT[stranded.priority] : MISSION_WEIGHT.normal) + RESCUE_BONUS + Math.min(robot.blockedTicks * 2, MAX_AGING);
+    }
     const mission = robot.missionId ? this.missions.get(robot.missionId) : undefined;
     if (!mission) return Math.min(robot.blockedTicks, 4);
     return MISSION_WEIGHT[mission.priority] + (robot.packageId ? CARRY_BONUS : 0) + Math.min(robot.blockedTicks * 2, MAX_AGING);
@@ -557,12 +604,12 @@ export class WarehouseEngine implements SimulationSource {
         rank: robot.rank,
         cell,
         goal,
-        mode: (robot.status === "failed" ? "failed" : robot.dwell > 0 ? "dwelling" : "mobile") as "failed" | "dwelling" | "mobile",
+        mode: (robot.status === "failed" || robot.status === "recovering" ? "failed" : robot.dwell > 0 ? "dwelling" : "mobile") as "failed" | "dwelling" | "mobile",
         waiting: robot.status === "waiting" && !this.yields.has(id),
         waitStreak: robot.status === "waiting" ? robot.blockedTicks : 0,
         reservationBlocker: view.waitingFor,
-        hasMission: mission !== undefined && isActiveMission(mission.state),
-        missionWeight: mission ? MISSION_WEIGHT[mission.priority] : 0,
+        hasMission: (mission !== undefined && isActiveMission(mission.state)) || robot.rescue !== null,
+        missionWeight: mission ? MISSION_WEIGHT[mission.priority] : robot.rescue ? MISSION_WEIGHT.normal + RESCUE_BONUS : 0,
         carrying: robot.packageId !== null,
         onNarrow: layout.cells[cell] === "narrow",
         distanceToGoal: goal === cell ? 0 : this.coordinator.distance(goal, cell),
@@ -715,7 +762,13 @@ export class WarehouseEngine implements SimulationSource {
       .sort((a, b) => MISSION_WEIGHT[b.priority] - MISSION_WEIGHT[a.priority] || a.createdTick - b.createdTick || a.id.localeCompare(b.id));
     for (const mission of queued) {
       const candidates = this.robots.filter(
-        (r) => r.status !== "failed" && r.status !== "recovering" && r.missionId === null && r.dwell === 0 && r.battery >= MIN_ASSIGN_BATTERY,
+        (r) =>
+          r.status !== "failed" &&
+          r.status !== "recovering" &&
+          r.missionId === null &&
+          r.rescue === null &&
+          r.dwell === 0 &&
+          r.battery >= MIN_ASSIGN_BATTERY,
       );
       if (candidates.length === 0) return;
       const pickup = this.station(mission.pickupStationId);
@@ -764,10 +817,25 @@ export class WarehouseEngine implements SimulationSource {
         `${mission.id}${mission.priority !== "normal" ? ` (${mission.priority})` : ""} assigned to ${robot.spec.id} (${mission.pickupStationId} → ${mission.dropoffStationId}, ${best.cost} cells)`,
         { robotId: robot.spec.id, missionId: mission.id, packageId: mission.packageId },
       );
+      const failedId = this.reassignFrom.get(mission.id);
+      if (failedId) {
+        this.reassignFrom.delete(mission.id);
+        this.emit("robot_recovery_completed", "success", `${failedId}'s ${mission.id} reassigned to ${robot.spec.id}; nothing was lost`, {
+          robotId: failedId,
+          robotIds: [failedId, robot.spec.id],
+          missionId: mission.id,
+          packageId: mission.packageId,
+          action: "mission-reassigned",
+          status: "completed",
+        });
+      }
     }
   }
 
   private targetFor(robot: RobotRuntime): Target | null {
+    if (robot.rescue) {
+      return { kind: "rescue", cell: this.cellPoint(robot.rescue.approachCell), stationId: null, action: "travel-to-recovery" };
+    }
     if (robot.missionId) {
       const mission = this.missions.get(robot.missionId)!;
       if (mission.state === "assigned" || mission.state === "to-pickup") {
@@ -822,6 +890,15 @@ export class WarehouseEngine implements SimulationSource {
   private arrive(robot: RobotRuntime, target: Target): void {
     robot.blockedTicks = 0;
     const handling = this.scenario.definition.handling;
+    if (target.kind === "rescue" && robot.rescue) {
+      const task = this.recovery.openTaskFor(robot.rescue.packageId);
+      robot.dwell = this.recovery.handoverTicks;
+      this.setStatus(robot, "loading");
+      robot.action = "handover";
+      robot.note = `Taking over ${robot.rescue.packageId} from ${task?.failedRobotId ?? "the failed robot"}`;
+      this.recovery.onArrived(robot.rescue.taskId);
+      return;
+    }
     if (target.kind === "pickup") {
       const mission = this.missions.get(robot.missionId!)!;
       this.setMission(mission.id, "picking-up");
@@ -885,6 +962,10 @@ export class WarehouseEngine implements SimulationSource {
   }
 
   private completeDwell(robot: RobotRuntime): void {
+    if (robot.action === "handover" && robot.rescue) {
+      this.completeHandover(robot);
+      return;
+    }
     const mission = this.missions.get(robot.missionId!)!;
     const here = stationAt(this.scenario.layout, robot.position)?.id ?? null;
     if (robot.status === "loading") {
@@ -947,7 +1028,7 @@ export class WarehouseEngine implements SimulationSource {
   }
 
   private updateBatteryFlag(robot: RobotRuntime): void {
-    if (robot.status === "failed") return;
+    if (robot.status === "failed" || robot.status === "recovering") return;
     if (robot.battery < LOW_BATTERY_THRESHOLD && !robot.lowBatteryFlag) {
       robot.lowBatteryFlag = true;
       this.emit("battery-low", "warning", `${robot.spec.id} battery below ${LOW_BATTERY_THRESHOLD}%`, { robotId: robot.spec.id });
@@ -964,12 +1045,20 @@ export class WarehouseEngine implements SimulationSource {
         return this.addMission(command.pickupStationId, command.dropoffStationId, command.priority);
       case "cancel-mission":
         return this.cancelMission(command.missionId);
-      case "close-aisle":
+      case "close_aisle":
         return this.closeAisle(command.cells, command.label);
-      case "reopen-aisle":
+      case "reopen_aisle":
         return this.reopenAisle(command.closureId);
-      case "fail-robot":
-        return this.failRobot(command.robotId, command.reason);
+      case "fail_robot":
+        return this.failRobot(command.robotId, command.failureType ?? "motor", command.reason);
+      case "restore_robot":
+        return this.restoreRobot(command.robotId);
+      case "start_package_recovery":
+        return this.startPackageRecovery(command.packageId, command.rescuerId);
+      case "complete_package_handover":
+        return this.completePackageHandover(command.packageId);
+      case "cancel_recovery":
+        return this.cancelRecovery(command.packageId);
     }
   }
 
@@ -1036,68 +1125,558 @@ export class WarehouseEngine implements SimulationSource {
     this.closures.push(closure);
     for (const key of unique.keys()) this.closedCells.set(key, id);
     this.worldVersion += 1;
+    // Robots standing on a closed cell stay where they are (never moved or removed);
+    // they may leave it, and no plan may enter it from now on.
+    const occupants = this.robots.filter((r) => unique.has(this.cellIndex(r.position))).map((r) => r.spec.id);
     const affected = this.coordinator.worldChanged((cell) => unique.has(cell), this.tick);
-    for (const robotId of affected) this.robotById(robotId)!.stats.replans += 1;
     this.emit(
-      "aisle-closed",
+      "aisle_closed",
       "warning",
-      `${id} closed ${unique.size} cell${unique.size > 1 ? "s" : ""}${affected.length ? ` · routes of ${affected.join(", ")} released and replanned` : ""}`,
-      { closureId: id },
+      `${id} closed ${unique.size} cell${unique.size > 1 ? "s" : ""}${affected.length ? ` · routes of ${affected.join(", ")} invalidated` : ""}${
+        occupants.length ? ` · ${occupants.join(", ")} stay${occupants.length === 1 ? "s" : ""} in place and may only leave; nobody may enter` : ""
+      }`,
+      { closureId: id, cell: closure.cells[0], robotIds: affected, reason: closure.label },
     );
-    if (affected.length) {
-      this.emit("robot-replanned", "info", `Reservations released for ${affected.join(", ")} after ${id}; new space-time routes on the next tick`, { closureId: id });
+    const closedCells = [...unique.values()];
+    for (const robotId of affected) {
+      const robot = this.robotById(robotId)!;
+      robot.stats.replans += 1;
+      const plan = this.coordinator.robotView(robotId, this.tick).plan;
+      const hit = plan.find((step) => unique.has(step.cell));
+      this.invalidateRoute(robot, `${id} closed ${hit !== undefined ? this.cellRefOf(hit.cell) : "its route"}`, {
+        closureId: id,
+        cell: hit !== undefined ? this.cellPoint(hit.cell) : closedCells[0],
+      });
     }
-    return ok({ message: `${id} closed`, entityId: id });
+    return ok({ message: `${id} closed${occupants.length ? ` (${occupants.join(", ")} on it, held in place)` : ""}`, entityId: id });
   }
 
   private reopenAisle(closureId: string): CommandResult {
     const closure = this.closures.find((c) => c.id === closureId);
     if (!closure) return err("unknown-closure", `Unknown closure "${closureId}"`);
+    // Robots that will get a shorter route (or any route at all) once the cells reopen.
+    const before = new Map(
+      this.robots
+        .filter((r) => r.goal && r.status !== "failed" && r.status !== "recovering")
+        .map((r) => [r.spec.id, this.coordinator.distance(this.cellIndex(r.goal!), this.cellIndex(r.position))]),
+    );
     this.closures = this.closures.filter((c) => c.id !== closureId);
     for (const cell of closure.cells) this.closedCells.delete(this.cellIndex(cell));
     this.worldVersion += 1;
     this.coordinator.worldChanged(() => false, this.tick);
-    this.emit("aisle-reopened", "info", `${closureId} reopened`, { closureId });
+    const improved: string[] = [];
+    for (const [robotId, old] of before) {
+      const robot = this.robotById(robotId)!;
+      const now = this.coordinator.distance(this.cellIndex(robot.goal!), this.cellIndex(robot.position));
+      if (now >= 0 && (old < 0 || now < old)) {
+        improved.push(robotId);
+        this.coordinator.invalidate(robotId);
+        this.pendingReplan.set(robotId, `${closureId} reopened`);
+      }
+    }
+    this.emit(
+      "aisle_reopened",
+      "info",
+      `${closureId} reopened: ${closure.cells.length} cell${closure.cells.length > 1 ? "s" : ""} traversable again${improved.length ? ` · ${improved.join(", ")} replan shorter routes` : ""}`,
+      { closureId, cell: closure.cells[0], robotIds: improved, reason: closure.label },
+    );
     return ok({ message: `${closureId} reopened`, entityId: closureId });
   }
 
-  private failRobot(robotId: string, reason?: string): CommandResult {
+  /**
+   * Halt a robot. Its work is recovered without losing anything:
+   *  - before pickup: the package reservation is released and the mission
+   *    requeued for another robot;
+   *  - while carrying: the package becomes recovery-required (custody stays
+   *    with the failed robot) and a recovery task is opened;
+   *  - while rescuing: its rescue attempt ends and another robot is chosen.
+   */
+  private failRobot(robotId: string, type: FailureType, reason?: string): CommandResult {
     const robot = this.robotById(robotId);
     if (!robot) return err("unknown-robot", `Unknown robot "${robotId}"`);
+    if (!FAILURE_TYPES.includes(type)) return err("invalid-failure-type", `Unknown failure type "${String(type)}"`);
     if (robot.status === "failed") return err("robot-unavailable", `${robotId} has already failed`);
-    const why = reason?.trim() || "Marked failed by operator";
+    const why = reason?.trim() || FAILURE_LABEL[type];
+    if (robot.status === "recovering") this.recovery.abortRestore(robotId);
+
+    // A rescuer never holds custody before the handover: just stand it down.
+    let leftTask: string | null = null;
+    if (robot.rescue) {
+      const { packageId, taskId } = robot.rescue;
+      this.recovery.onRescuerFailed(robotId, this.tick);
+      this.setPackage(this.expect(assignRescuer(this.pkg(packageId), taskId, null, this.tick, `Rescuer ${robotId} failed (${FAILURE_LABEL[type]}) before the handover`)));
+      robot.rescue = null;
+      leftTask = taskId;
+    }
+
     this.setStatus(robot, "failed");
     robot.action = "halted";
+    // Halts where it stands (also for display: no interpolation from its last cell).
+    robot.previousPosition = robot.position;
     robot.dwell = 0;
     robot.goal = null;
+    robot.goalStationId = null;
+    robot.restoreTicks = 0;
     this.yields.delete(robotId);
     this.worldVersion += 1;
     robot.blockedTicks = 0;
     robot.chargerId = null;
-    robot.note = why;
-    this.emit("robot-failed", "critical", `${robotId} failed: ${why}`, { robotId, missionId: robot.missionId ?? undefined });
+    robot.note = `${FAILURE_LABEL[type]}: ${why}`;
+    const failure = this.recovery.recordFailure({
+      robotId,
+      type,
+      reason: why,
+      tick: this.tick,
+      position: robot.position,
+      missionId: robot.missionId,
+      packageId: robot.packageId,
+    });
+    this.emit(
+      "robot_failed",
+      "critical",
+      `${robotId} failed (${FAILURE_LABEL[type]}): ${why} at ${this.cellRefOf(this.cellIndex(robot.position))}${
+        robot.packageId ? ` carrying ${robot.packageId}` : robot.missionId ? ` on ${robot.missionId}` : ""
+      }${leftTask ? ` · was recovering a package for ${leftTask}; another robot will be selected` : ""}`,
+      {
+        robotId,
+        robotIds: [robotId],
+        missionId: robot.missionId ?? undefined,
+        packageId: robot.packageId ?? undefined,
+        cell: robot.position,
+        failureType: type,
+        reason: why,
+        status: failure.status,
+        action: "halt",
+        taskId: leftTask ?? undefined,
+      },
+    );
+
     if (robot.missionId) {
       const mission = this.missions.get(robot.missionId)!;
-      if (isActiveMission(mission.state)) {
-        this.setMission(mission.id, "recovery-required");
-        const pkg = this.pkg(mission.packageId);
-        this.setPackage(
-          annotateCustody(pkg, this.tick, robotId, `Holder ${robotId} failed while package ${pkg.state}; custody retained pending recovery`),
-        );
-        this.emit("mission-recovery-required", "critical", `${mission.id} needs recovery: ${mission.packageId} is ${pkg.state} with failed ${robotId}`, {
+      const pkg = this.pkg(mission.packageId);
+      if (mission.state === "assigned" || mission.state === "to-pickup" || mission.state === "picking-up") {
+        // Nothing on board yet: give the job to another robot.
+        if (pkg.state === "reserved") {
+          this.setPackage(this.expect(releaseReservation(pkg, robotId, this.tick, `${robotId} failed before pickup`)));
+        }
+        this.setMission(mission.id, "queued", { robotId: null, assignedTick: null });
+        robot.missionId = null;
+        this.reassignFrom.set(mission.id, robotId);
+        this.emit("robot_recovery_started", "warning", `${mission.id} requeued: ${robotId} failed before picking up ${mission.packageId}; it will be reassigned`, {
           robotId,
+          robotIds: [robotId],
           missionId: mission.id,
           packageId: mission.packageId,
+          cell: robot.position,
+          action: "requeue-mission",
+          status: "pending",
+          reason: why,
         });
+      } else if (pkg.state === "picked-up" || pkg.state === "in-transit" || pkg.state === "recovery-required") {
+        if (pkg.state !== "recovery-required") {
+          this.setPackage(this.expect(markRecoveryRequired(pkg, robotId, this.tick, FAILURE_LABEL[type])));
+        }
+        if (mission.state !== "recovery-required") this.setMission(mission.id, "recovery-required");
+        this.openRecovery(robot, mission.id, mission.packageId, why);
       }
     }
     this.requeueMissionsBlockedAt(robot.position, robotId);
-    // Release its reservations, hold its cell permanently; affected robots replan.
+    // Release its reservations and hold its cell; robots routed through it replan.
     const affected = this.coordinator.fail(robotId, this.cellIndex(robot.position), this.tick);
-    if (affected.length) {
-      this.emit("robot-replanned", "info", `Reservations crossing failed ${robotId} released for ${affected.join(", ")}`, { robotId });
+    for (const id of affected) {
+      this.invalidateRoute(this.robotById(id)!, `${robotId} failed at ${this.cellRefOf(this.cellIndex(robot.position))}`, {
+        cell: robot.position,
+      });
     }
-    return ok({ message: `${robotId} marked failed`, entityId: robotId });
+    return ok({ message: `${robotId} failed (${FAILURE_LABEL[type]})`, entityId: robotId });
+  }
+
+  private openRecovery(robot: RobotRuntime, missionId: string, packageId: string, why: string): void {
+    const task = this.recovery.openTask(packageId, missionId, robot.spec.id, this.tick);
+    this.setPackage(this.expect(assignRescuer(this.pkg(packageId), task.id, null, this.tick, `${task.id} opened to recover ${packageId}`)));
+    this.emit(
+      "package_recovery_required",
+      "critical",
+      `${packageId} needs recovery: stranded on failed ${robot.spec.id} at ${this.cellRefOf(this.cellIndex(robot.position))} (${missionId}); custody stays with ${robot.spec.id}`,
+      {
+        robotId: robot.spec.id,
+        robotIds: [robot.spec.id],
+        missionId,
+        packageId,
+        taskId: task.id,
+        cell: robot.position,
+        action: "hold-custody",
+        status: "pending",
+        reason: why,
+      },
+    );
+    this.emit("robot_recovery_started", "warning", `${task.id} opened for ${robot.spec.id}: ${packageId} will be handed over to a recovery robot`, {
+      robotId: robot.spec.id,
+      robotIds: [robot.spec.id],
+      missionId,
+      packageId,
+      taskId: task.id,
+      cell: robot.position,
+      action: "recover-package",
+      status: "pending",
+    });
+  }
+
+  /** Start restoring a failed robot; it rejoins the fleet after a type-specific delay. */
+  private restoreRobot(robotId: string): CommandResult {
+    const robot = this.robotById(robotId);
+    if (!robot) return err("unknown-robot", `Unknown robot "${robotId}"`);
+    if (robot.status !== "failed") return err("robot-not-failed", `${robotId} is ${robot.status}, not failed`);
+    const failure = this.recovery.failureOf(robotId);
+    const type = failure?.type ?? "motor";
+    this.setStatus(robot, "recovering");
+    robot.action = "restoring";
+    robot.restoreTicks = RESTORE_TICKS[type];
+    robot.note = `Restoring · ${robot.restoreTicks} ticks left`;
+    this.recovery.beginRestore(robotId, this.tick);
+    this.worldVersion += 1;
+    // Still holding a stranded package: it will deliver it itself, so stand any rescuer down.
+    if (robot.packageId) {
+      const outcome = this.recovery.onHolderRestored(robot.packageId, this.tick);
+      if (outcome?.releasedRescuer) this.releaseRescuer(outcome.releasedRescuer, `${robotId} is being restored and keeps ${robot.packageId}`);
+      const pkg = this.pkg(robot.packageId);
+      if (pkg.recovery?.rescuerId || pkg.recovery?.taskId) {
+        this.setPackage(this.expect(assignRescuer(pkg, outcome?.task.id ?? pkg.recovery.taskId ?? "", null, this.tick, `${robotId} restoring; recovery stood down`)));
+      }
+    }
+    this.emit("robot_recovery_started", "info", `${robotId} restoring after ${failure ? FAILURE_LABEL[failure.type].toLowerCase() : "failure"} (${robot.restoreTicks} ticks)`, {
+      robotId,
+      robotIds: [robotId],
+      cell: robot.position,
+      failureType: failure?.type,
+      action: "restore-robot",
+      status: "restoring",
+      packageId: robot.packageId ?? undefined,
+      missionId: robot.missionId ?? undefined,
+    });
+    return ok({ message: `${robotId} restoring (${robot.restoreTicks} ticks)`, entityId: robotId });
+  }
+
+  private completeRestore(robot: RobotRuntime): void {
+    const id = robot.spec.id;
+    const failure = this.recovery.failureOf(id);
+    this.setStatus(robot, "idle");
+    robot.action = "none";
+    robot.restoreTicks = 0;
+    if (failure?.type === "battery") robot.battery = 100;
+    this.recovery.finishRestore(id, this.tick);
+    this.coordinator.restore(id, this.cellIndex(robot.position), this.tick - 1);
+    this.worldVersion += 1;
+    robot.note = "Restored to service";
+    robot.routeEvent = { kind: "replanned", tick: this.tick, cause: "restored" };
+    this.emit("robot_restored", "success", `${id} restored to service at ${this.cellRefOf(this.cellIndex(robot.position))}`, {
+      robotId: id,
+      robotIds: [id],
+      cell: robot.position,
+      failureType: failure?.type,
+      action: "restore-robot",
+      status: "restored",
+    });
+    if (robot.packageId && robot.missionId) {
+      const mission = this.missions.get(robot.missionId)!;
+      this.setPackage(this.expect(resumeCustody(this.pkg(robot.packageId), id, this.tick)));
+      this.setMission(mission.id, "carrying");
+      this.setStatus(robot, "carrying");
+      robot.action = "travel-to-dropoff";
+      this.emit("package_delivery_resumed", "success", `${id} resumes delivering ${robot.packageId} to ${mission.dropoffStationId}`, {
+        robotId: id,
+        robotIds: [id],
+        missionId: mission.id,
+        packageId: robot.packageId,
+        stationId: mission.dropoffStationId,
+        cell: robot.position,
+        action: "resume-delivery",
+        status: "completed",
+      });
+      this.emit("robot_recovery_completed", "success", `${id} recovered: it kept custody of ${robot.packageId} and resumed ${mission.id}`, {
+        robotId: id,
+        robotIds: [id],
+        missionId: mission.id,
+        packageId: robot.packageId,
+        action: "resumed-by-holder",
+        status: "completed",
+      });
+    }
+  }
+
+  private startPackageRecovery(packageId: string, rescuerId?: string): CommandResult {
+    const pkg = this.packages.get(packageId);
+    if (!pkg) return err("unknown-package", `Unknown package "${packageId}"`);
+    if (pkg.state !== "recovery-required") return err("package-not-stranded", `${packageId} is ${pkg.state}; only recovery-required packages need recovery`);
+    const holder = this.robotById(pkg.holderRobotId!)!;
+    if (holder.status !== "failed") return err("holder-restoring", `${holder.spec.id} is being restored and will deliver ${packageId} itself`);
+    if (rescuerId !== undefined) {
+      const rescuer = this.robotById(rescuerId);
+      if (!rescuer) return err("unknown-robot", `Unknown robot "${rescuerId}"`);
+      if (!this.isEligibleRescuer(rescuer)) {
+        return err("robot-unavailable", `${rescuerId} cannot recover a package now (must be operational, free and charged)`);
+      }
+    }
+    if (!this.recovery.openTaskFor(packageId) && !this.recovery.start(packageId, rescuerId ?? null)) {
+      this.recovery.openTask(packageId, pkg.missionId, holder.spec.id, this.tick);
+    }
+    const task = this.recovery.start(packageId, rescuerId ?? null);
+    if (!task) return err("recovery-in-progress", `Recovery of ${packageId} is already under way`);
+    this.setPackage(this.expect(assignRescuer(this.pkg(packageId), task.id, null, this.tick, `${task.id} started by operator${rescuerId ? ` (rescuer ${rescuerId})` : ""}`)));
+    return ok({ message: `${task.id}: recovery of ${packageId} started${rescuerId ? ` with ${rescuerId}` : ""}`, entityId: task.id });
+  }
+
+  private completePackageHandover(packageId: string): CommandResult {
+    const pkg = this.packages.get(packageId);
+    if (!pkg) return err("unknown-package", `Unknown package "${packageId}"`);
+    const task = this.recovery.openTaskFor(packageId);
+    if (pkg.state !== "recovery-required" || !task || !task.rescuerId) {
+      return err("no-rescuer", `${packageId} has no recovery robot assigned`);
+    }
+    const rescuer = this.robotById(task.rescuerId)!;
+    const holder = this.robotById(task.failedRobotId)!;
+    if (manhattan(rescuer.position, holder.position) !== 1 || rescuer.previousPosition === undefined) {
+      return err("rescuer-not-adjacent", `${rescuer.spec.id} must be next to ${holder.spec.id} to take over ${packageId}`);
+    }
+    if (rescuer.dwell === 0 && rescuer.action !== "handover") {
+      // Beside the holder but not yet in handover: start it now.
+      this.recovery.onArrived(task.id);
+    }
+    rescuer.dwell = 0;
+    this.completeHandover(rescuer);
+    return ok({ message: `${packageId} handed over to ${rescuer.spec.id}`, entityId: packageId });
+  }
+
+  private cancelRecovery(packageId: string): CommandResult {
+    const pkg = this.packages.get(packageId);
+    if (!pkg) return err("unknown-package", `Unknown package "${packageId}"`);
+    const outcome = this.recovery.cancel(packageId, this.tick);
+    if (!outcome) return err("no-open-recovery", `${packageId} has no open recovery to cancel`);
+    if (outcome.releasedRescuer) this.releaseRescuer(outcome.releasedRescuer, `${outcome.task.id} cancelled by operator`);
+    this.setPackage(this.expect(assignRescuer(this.pkg(packageId), outcome.task.id, null, this.tick, `${outcome.task.id} cancelled by operator`)));
+    this.emit("package_recovery_required", "warning", `${outcome.task.id} cancelled: ${packageId} stays with failed ${outcome.task.failedRobotId} until recovery is restarted or the robot is restored`, {
+      robotId: outcome.task.failedRobotId,
+      robotIds: [outcome.task.failedRobotId, ...(outcome.releasedRescuer ? [outcome.releasedRescuer] : [])],
+      missionId: outcome.task.missionId,
+      packageId,
+      taskId: outcome.task.id,
+      action: "cancel-recovery",
+      status: "cancelled",
+      reason: "cancelled by operator",
+    });
+    return ok({ message: `${outcome.task.id} cancelled`, entityId: outcome.task.id });
+  }
+
+  /**
+   * Atomic custody handover from the failed holder to its rescuer: package,
+   * mission and both robots change together within one engine step.
+   */
+  private completeHandover(rescuer: RobotRuntime): void {
+    const { taskId, packageId } = rescuer.rescue!;
+    const task = this.recovery.openTaskFor(packageId)!;
+    const holder = this.robotById(task.failedRobotId)!;
+    if (holder.status !== "failed" || manhattan(holder.position, rescuer.position) !== 1) {
+      throw new InvariantViolation(this.tick, [`handover of ${packageId}: ${rescuer.spec.id} is not beside failed ${holder.spec.id}`]);
+    }
+    const mission = this.missions.get(task.missionId)!;
+    this.setPackage(this.expect(transferCustody(this.pkg(packageId), holder.spec.id, rescuer.spec.id, this.tick, taskId)));
+    this.setMission(mission.id, "carrying", { robotId: rescuer.spec.id });
+    holder.packageId = null;
+    holder.missionId = null;
+    holder.note = `${FAILURE_LABEL[this.recovery.failureOf(holder.spec.id)?.type ?? "motor"]}; ${packageId} handed over to ${rescuer.spec.id}`;
+    rescuer.rescue = null;
+    rescuer.packageId = packageId;
+    rescuer.missionId = mission.id;
+    rescuer.dwell = 0;
+    this.setStatus(rescuer, "carrying");
+    rescuer.action = "travel-to-dropoff";
+    rescuer.note = `Carrying ${packageId} to ${mission.dropoffStationId} (recovered from ${holder.spec.id})`;
+    this.coordinator.invalidate(rescuer.spec.id);
+    this.recovery.onHandedOver(taskId, this.tick);
+    const refs = { robotIds: [holder.spec.id, rescuer.spec.id], missionId: mission.id, packageId, taskId, cell: holder.position };
+    this.emit("package_custody_transferred", "success", `${packageId} custody transferred ${holder.spec.id} → ${rescuer.spec.id} (${taskId})`, {
+      ...refs,
+      robotId: rescuer.spec.id,
+      action: "transfer-custody",
+      status: "completed",
+    });
+    this.emit("package_delivery_resumed", "success", `${rescuer.spec.id} resumes ${mission.id}: delivering ${packageId} to ${mission.dropoffStationId}`, {
+      ...refs,
+      robotId: rescuer.spec.id,
+      stationId: mission.dropoffStationId,
+      action: "resume-delivery",
+      status: "completed",
+    });
+    this.emit("robot_recovery_completed", "success", `${holder.spec.id}'s work recovered: ${rescuer.spec.id} now carries ${packageId}`, {
+      ...refs,
+      robotId: holder.spec.id,
+      action: "package-handed-over",
+      status: "completed",
+    });
+  }
+
+  /** Stand a rescuer down (timeout, cancellation, holder restored); it never held custody. */
+  private releaseRescuer(robotId: string, why: string): void {
+    const robot = this.robotById(robotId);
+    if (!robot || !robot.rescue) return;
+    robot.rescue = null;
+    robot.goal = null;
+    robot.goalStationId = null;
+    if (robot.action === "handover") {
+      robot.dwell = 0;
+      this.setStatus(robot, "idle");
+    }
+    robot.action = "none";
+    robot.note = `Recovery stood down: ${why}`;
+    this.coordinator.invalidate(robotId);
+  }
+
+  private isEligibleRescuer(r: RobotRuntime): boolean {
+    return (
+      r.status !== "failed" &&
+      r.status !== "recovering" &&
+      r.missionId === null &&
+      r.packageId === null &&
+      r.rescue === null &&
+      r.dwell === 0 &&
+      r.battery >= MIN_ASSIGN_BATTERY &&
+      !this.yields.has(r.spec.id)
+    );
+  }
+
+  /** Free cells beside a failed robot where a rescuer can stand for the handover. */
+  private approachCells(failedId: string): number[] {
+    const failed = this.robotById(failedId)!;
+    const cell = this.cellIndex(failed.position);
+    const { width, height } = this.scenario.layout;
+    const x = cell % width;
+    const y = (cell - x) / width;
+    return [y > 0 ? cell - width : -1, x < width - 1 ? cell + 1 : -1, y < height - 1 ? cell + width : -1, x > 0 ? cell - 1 : -1].filter(
+      (n) => n >= 0 && this.grid.passable(n, false),
+    );
+  }
+
+  /** Phase 0: recovery decisions (rescuer dispatch, timeouts) before mission assignment. */
+  private runRecovery(): void {
+    const occupant = new Map(this.robots.map((r) => [this.cellIndex(r.position), r.spec.id]));
+    const port: RecoveryPort = {
+      tick: this.tick,
+      worldVersion: this.worldVersion,
+      eligible: () => this.robots.filter((r) => this.isEligibleRescuer(r)).map((r) => ({ id: r.spec.id, rank: r.rank, cell: this.cellIndex(r.position) })),
+      approach: (failedId, fromCell) => {
+        const self = occupant.get(fromCell);
+        let best: { cell: number; distance: number } | null = null;
+        for (const cell of this.approachCells(failedId)) {
+          const who = occupant.get(cell);
+          if (who !== undefined && who !== self) continue;
+          const hold = this.coordinator.table.holdAt(cell);
+          if (hold && hold.robotId !== self) continue;
+          const distance = cell === fromCell ? 0 : this.coordinator.distance(cell, fromCell);
+          if (distance < 0) continue;
+          if (!best || distance < best.distance) best = { cell, distance };
+        }
+        return best;
+      },
+      reachable: (failedId) =>
+        this.approachCells(failedId).some((cell) =>
+          this.robots.some((r) => r.status !== "failed" && r.status !== "recovering" && this.coordinator.distance(cell, this.cellIndex(r.position)) >= 0),
+        ),
+      holderOnDestination: (packageId) => {
+        const pkg = this.pkg(packageId);
+        const holder = pkg.holderRobotId ? this.robotById(pkg.holderRobotId) : undefined;
+        return holder !== undefined && samePoint(holder.position, this.station(pkg.destinationStationId).position);
+      },
+    };
+    const update = this.recovery.update(port);
+    for (const r of update.release) {
+      this.releaseRescuer(r.rescuerId, `timed out on ${r.taskId}`);
+      this.setPackage(this.expect(assignRescuer(this.pkg(r.packageId), r.taskId, null, this.tick, `${r.rescuerId} timed out`)));
+      this.emit("recovery_failed", "warning", `${r.taskId}: ${r.rescuerId} did not reach the failed robot within ${this.recovery.timeoutTicks} ticks; trying another robot`, {
+        robotId: r.rescuerId,
+        robotIds: [r.rescuerId],
+        packageId: r.packageId,
+        taskId: r.taskId,
+        action: "release-rescuer",
+        status: "pending",
+        reason: "rescuer timed out",
+      });
+    }
+    for (const d of update.dispatch) {
+      const robot = this.robotById(d.rescuerId)!;
+      robot.rescue = { taskId: d.taskId, packageId: d.packageId, approachCell: d.approachCell };
+      robot.chargerId = null;
+      robot.blockedTicks = 0;
+      robot.noPathAnnounced = false;
+      robot.note = `Heading to recover ${d.packageId}`;
+      this.coordinator.invalidate(robot.spec.id);
+      this.setPackage(this.expect(assignRescuer(this.pkg(d.packageId), d.taskId, d.rescuerId, this.tick, `${d.rescuerId} dispatched to take over ${d.packageId} (${d.taskId})`)));
+    }
+    for (const e of update.events) {
+      this.emit(e.kind, e.severity, e.message, {
+        robotId: e.robotId,
+        robotIds: e.robotIds,
+        missionId: e.missionId,
+        packageId: e.packageId,
+        taskId: e.taskId,
+        attempt: e.attempt,
+        cell: e.cell !== undefined ? this.cellPoint(e.cell) : undefined,
+        action: e.action,
+        status: e.status,
+        reason: e.reason,
+      });
+    }
+  }
+
+  /** A world change invalidated this robot's route: record it and report the replan when it happens. */
+  private invalidateRoute(robot: RobotRuntime, cause: string, refs: { closureId?: string; cell?: GridPoint }): void {
+    robot.routeEvent = { kind: "invalidated", tick: this.tick, cause };
+    this.pendingReplan.set(robot.spec.id, cause);
+    this.emit("route_invalidated", "warning", `${robot.spec.id} route invalidated: ${cause}; reservations released`, {
+      robotId: robot.spec.id,
+      robotIds: [robot.spec.id],
+      missionId: robot.missionId ?? undefined,
+      packageId: robot.packageId ?? undefined,
+      action: "release-reservations",
+      reason: cause,
+      ...refs,
+    });
+  }
+
+  /** After planning: report robots that replanned following a world change. */
+  private reportReplans(modes: ReadonlyMap<string, CoordMode>): void {
+    for (const [robotId, cause] of [...this.pendingReplan].sort(([a], [b]) => a.localeCompare(b))) {
+      if (modes.get(robotId) !== "mobile") {
+        if (modes.get(robotId) === "failed") this.pendingReplan.delete(robotId);
+        continue;
+      }
+      this.pendingReplan.delete(robotId);
+      const robot = this.robotById(robotId)!;
+      const view = this.coordinator.robotView(robotId, this.tick - 1);
+      const cells = new Set(view.plan.map((s) => s.cell)).size;
+      const noRoute = view.planStatus === "unreachable" || view.planStatus === "blocked";
+      robot.routeEvent = { kind: noRoute ? "no-route" : "replanned", tick: this.tick, cause };
+      this.emit(
+        "robot_route_replanned",
+        noRoute ? "warning" : "info",
+        noRoute
+          ? `${robotId} has no route after ${cause}; holding safely until the warehouse changes`
+          : `${robotId} replanned after ${cause}: ${view.planStatus} route over ${cells} cell${cells === 1 ? "" : "s"}`,
+        {
+          robotId,
+          robotIds: [robotId],
+          missionId: robot.missionId ?? undefined,
+          packageId: robot.packageId ?? undefined,
+          action: noRoute ? "hold" : "replan",
+          reason: cause,
+          cell: robot.goal ?? undefined,
+        },
+      );
+    }
+  }
+
+  private cellRefOf(cell: number): string {
+    const p = this.cellPoint(cell);
+    return `(${p.x}, ${p.y})`;
   }
 
   // =============================================================== helpers
@@ -1157,8 +1736,7 @@ export class WarehouseEngine implements SimulationSource {
 
   /**
    * Scheduling response to a station becoming unusable before pickup: the
-   * mission returns to the queue and its robot is released. (Robot repair and
-   * custody transfer are failure recovery — Mission 004.)
+   * mission returns to the queue and its robot is released.
    */
   private requeueMissionsBlockedAt(p: GridPoint, failedId: string): string[] {
     const requeued: string[] = [];
@@ -1237,7 +1815,23 @@ export class WarehouseEngine implements SimulationSource {
     kind: SimEventKind,
     severity: EventSeverity,
     message: string,
-    refs: Pick<SimEvent, "robotId" | "missionId" | "packageId" | "stationId" | "closureId" | "robotIds" | "incidentId" | "attempt" | "cell" | "action" | "status"> = {},
+    refs: Pick<
+      SimEvent,
+      | "robotId"
+      | "missionId"
+      | "packageId"
+      | "stationId"
+      | "closureId"
+      | "robotIds"
+      | "incidentId"
+      | "attempt"
+      | "cell"
+      | "action"
+      | "status"
+      | "reason"
+      | "failureType"
+      | "taskId"
+    > = {},
   ): void {
     this.eventSeq += 1;
     this.events.push({ id: `E-${pad(this.eventSeq)}`, seq: this.eventSeq, tick: this.tick, kind, severity, message, ...refs });
@@ -1308,8 +1902,8 @@ export class WarehouseEngine implements SimulationSource {
         home: r.spec.home,
         missionId: r.missionId,
         packageId: r.packageId,
-        destinationStationId: r.status === "failed" ? null : r.goalStationId,
-        destination: r.status === "failed" ? null : r.goal,
+        destinationStationId: r.status === "failed" || r.status === "recovering" ? null : r.goalStationId,
+        destination: r.status === "failed" || r.status === "recovering" ? null : r.goal,
         route,
         blockedTicks: r.blockedTicks,
         priority: this.priorityOf(r),
@@ -1320,6 +1914,9 @@ export class WarehouseEngine implements SimulationSource {
         waitClass: this.deadlocks.classOf(r.spec.id),
         deadlockId: this.deadlocks.incidentOf(r.spec.id),
         activityNote: r.note,
+        failure: this.recovery.failureOf(r.spec.id),
+        recoveryRole: this.recovery.roleOf(r.spec.id),
+        routeEvent: r.routeEvent && this.tick - r.routeEvent.tick <= ROUTE_EVENT_TTL ? r.routeEvent : null,
         stats: { ...r.stats },
       };
     });
@@ -1345,6 +1942,7 @@ export class WarehouseEngine implements SimulationSource {
         (cell) => this.cellPoint(cell),
         (id) => robots.find((r) => r.id === id)?.blockedTicks ?? 0,
       ),
+      recovery: this.recovery.snapshot((cell) => this.cellPoint(cell)),
       metrics: computeMetrics(
         this.tick,
         robots,

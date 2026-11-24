@@ -118,7 +118,7 @@ describe("coordination in the engine", () => {
     const cell = { x: target!.x, y: target!.y };
     const occupied = before.robots.some((r) => r.position.x === cell.x && r.position.y === cell.y);
     if (occupied) return; // extremely unlikely; nothing to assert
-    const result = e.dispatch({ type: "close-aisle", cells: [cell] });
+    const result = e.dispatch({ type: "close_aisle", cells: [cell] });
     expect(result.ok).toBe(true);
     const after = e.step();
     expect(after.coordination.reservations.some((r) => r.x === cell.x && r.y === cell.y)).toBe(false);
@@ -131,7 +131,7 @@ describe("coordination in the engine", () => {
     const e = engine("standard");
     run(e, 15);
     const victim = e.getSnapshot().robots.find((r) => r.status === "moving" || r.status === "carrying")!;
-    e.dispatch({ type: "fail-robot", robotId: victim.id });
+    e.dispatch({ type: "fail_robot", robotId: victim.id });
     const snap = run(e, 60);
     const robot = snap.robots.find((r) => r.id === victim.id)!;
     expect(snap.coordination.reservations.some((r) => r.robotId === victim.id)).toBe(false);

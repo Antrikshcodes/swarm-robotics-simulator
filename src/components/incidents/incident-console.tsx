@@ -93,7 +93,7 @@ export function IncidentConsole() {
   };
 
   const reopen = (incident: Incident) => {
-    if (incident.closureId) useSimulationStore.getState().dispatch({ type: "reopen-aisle", closureId: incident.closureId });
+    if (incident.closureId) useSimulationStore.getState().dispatch({ type: "reopen_aisle", closureId: incident.closureId });
   };
 
   return (

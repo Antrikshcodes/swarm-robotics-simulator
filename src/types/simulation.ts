@@ -75,7 +75,13 @@ export type RobotAction =
   | "loading"
   | "unloading"
   | "charging"
-  | "halted";
+  | "halted"
+  /** Rescue robot heading to a failed robot to take over its package. */
+  | "travel-to-recovery"
+  /** Rescue robot taking custody of a package from a failed robot. */
+  | "handover"
+  /** Failed robot being restored to service. */
+  | "restoring";
 
 export interface RobotStats {
   readonly movingTicks: number;
@@ -143,7 +149,93 @@ export interface RobotState {
   readonly deadlockId: string | null;
   /** Human-readable explanation of the current activity. */
   readonly activityNote: string | null;
+  /** Current or most recent failure (null if the robot never failed). */
+  readonly failure: RobotFailure | null;
+  /** Role in an open package-recovery task, if any. */
+  readonly recoveryRole: { readonly taskId: string; readonly role: "holder" | "rescuer" } | null;
+  /** Latest route change caused by the world (closure, reopening, failure), kept a few ticks for display. */
+  readonly routeEvent: RouteEvent | null;
   readonly stats: RobotStats;
+}
+
+// ---------------------------------------------------------------- failures
+
+export type FailureType = "motor" | "battery" | "navigation" | "communication" | "emergency-stop";
+
+/** active = robot halted · restoring = restore in progress · restored = back in service. */
+export type FailureStatus = "active" | "restoring" | "restored";
+
+export interface RobotFailure {
+  /** Stable id, e.g. "F-01". */
+  readonly id: string;
+  readonly robotId: string;
+  readonly type: FailureType;
+  readonly reason: string;
+  readonly tick: number;
+  readonly position: GridPoint;
+  readonly missionId: string | null;
+  readonly packageId: string | null;
+  readonly status: FailureStatus;
+  readonly restoreStartedTick: number | null;
+  readonly restoredTick: number | null;
+}
+
+export interface RouteEvent {
+  readonly kind: "invalidated" | "replanned" | "no-route";
+  readonly tick: number;
+  readonly cause: string;
+}
+
+// ---------------------------------------------------------- package recovery
+
+export type RecoveryTaskStatus = "pending" | "en-route" | "handover" | "completed" | "failed" | "cancelled";
+
+export type RescueOutcome = "in-progress" | "handed-over" | "timeout" | "rescuer-failed" | "cancelled" | "holder-restored";
+
+export interface RescueAttempt {
+  readonly attempt: number;
+  readonly rescuerId: string;
+  /** Free cell next to the failed robot where the handover happens. */
+  readonly approachCell: GridPoint;
+  readonly startedTick: number;
+  readonly endedTick: number | null;
+  readonly outcome: RescueOutcome;
+}
+
+/** Recovery of a package stranded on a failed robot. */
+export interface RecoveryTask {
+  /** Stable id, e.g. "RC-01". */
+  readonly id: string;
+  readonly packageId: string;
+  readonly missionId: string;
+  readonly failedRobotId: string;
+  /** Robot currently assigned to retrieve the package. */
+  readonly rescuerId: string | null;
+  readonly status: RecoveryTaskStatus;
+  readonly createdTick: number;
+  readonly completedTick: number | null;
+  readonly attempts: readonly RescueAttempt[];
+  /** Latest explanation (waiting for a robot, handover, failure reason …). */
+  readonly note: string;
+}
+
+export interface RecoverySnapshot {
+  /** Latest failures, newest last, bounded. */
+  readonly failures: readonly RobotFailure[];
+  /** Latest recovery tasks, newest last, bounded. */
+  readonly tasks: readonly RecoveryTask[];
+  readonly stats: {
+    readonly failures: number;
+    readonly restored: number;
+    readonly handovers: number;
+    readonly recoveryFailures: number;
+  };
+  readonly settings: {
+    readonly autoStart: boolean;
+    readonly timeoutTicks: number;
+    readonly maxAttempts: number;
+    readonly handoverTicks: number;
+  };
 }
 
 // --------------------------------------------------------------- missions
@@ -185,7 +277,7 @@ export interface Mission {
 
 // --------------------------------------------------------------- packages
 
-export type PackageState = "available" | "reserved" | "picked-up" | "in-transit" | "delivered";
+export type PackageState = "available" | "reserved" | "picked-up" | "in-transit" | "recovery-required" | "delivered";
 
 export type PackageLocation =
   | { readonly kind: "station"; readonly stationId: string }
@@ -210,6 +302,15 @@ export interface Package {
   readonly holderRobotId: string | null;
   readonly location: PackageLocation;
   readonly history: readonly CustodyRecord[];
+  /**
+   * Set while the package is `recovery-required`: its holder failed. Only
+   * `rescuerId` may take custody, and only through an explicit handover.
+   */
+  readonly recovery: {
+    readonly failedRobotId: string;
+    readonly taskId: string | null;
+    readonly rescuerId: string | null;
+  } | null;
 }
 
 // ----------------------------------------------------------------- events
@@ -224,22 +325,31 @@ export type SimEventKind =
   | "mission-assigned"
   | "mission-cancelled"
   | "mission-requeued"
-  | "mission-recovery-required"
   | "pickup-started"
   | "package-picked-up"
   | "dropoff-started"
   | "package-delivered"
   | "robot-waiting"
-  | "robot-replanned"
   | "right-of-way"
   | "conflict-prevented"
   | "robot-no-path"
-  | "robot-failed"
   | "robot-charging"
   | "robot-returning-home"
   | "battery-low"
-  | "aisle-closed"
-  | "aisle-reopened"
+  // Failure recovery and topology changes (Mission 005 event contract).
+  | "robot_failed"
+  | "robot_recovery_started"
+  | "robot_recovery_completed"
+  | "robot_restored"
+  | "package_recovery_required"
+  | "package_recovery_started"
+  | "package_custody_transferred"
+  | "package_delivery_resumed"
+  | "aisle_closed"
+  | "aisle_reopened"
+  | "route_invalidated"
+  | "robot_route_replanned"
+  | "recovery_failed"
   // Deadlock lifecycle (names follow the Mission 004 event contract).
   | "deadlock_detected"
   | "deadlock_group_identified"
@@ -271,8 +381,13 @@ export interface SimEvent {
   readonly cell?: GridPoint;
   /** Recovery action taken, e.g. "yield-to-holding-position". */
   readonly action?: string;
-  /** Resolution status at the time of the event. */
-  readonly status?: DeadlockStatus;
+  /** Resolution status at the time of the event (deadlock or recovery status). */
+  readonly status?: DeadlockStatus | RecoveryTaskStatus | FailureStatus;
+  /** Why this happened (failure reason, invalidation cause …). */
+  readonly reason?: string;
+  readonly failureType?: FailureType;
+  /** Package-recovery task id, e.g. "RC-01". */
+  readonly taskId?: string;
 }
 
 /** Per-tick movement record, kept in a separate bounded log. */
@@ -447,6 +562,7 @@ export interface SimulationSnapshot {
   readonly deliveryTicks: readonly number[];
   readonly coordination: CoordinationSnapshot;
   readonly deadlocks: DeadlockSnapshot;
+  readonly recovery: RecoverySnapshot;
   readonly metrics: FleetMetrics;
 }
 

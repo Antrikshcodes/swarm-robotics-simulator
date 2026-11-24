@@ -169,7 +169,7 @@ describe("recovery safety", () => {
 
   it("a world change (aisle closure) lets a failed incident retry with a fresh, bounded budget", () => {
     const r = run("lab-e-unrecoverable", 40);
-    const result = r.engine.dispatch({ type: "close-aisle", cells: [{ x: 1, y: 1 }], label: "test" });
+    const result = r.engine.dispatch({ type: "close_aisle", cells: [{ x: 1, y: 1 }], label: "test" });
     expect(result.ok).toBe(true);
     let snap = r.snap;
     for (let i = 0; i < 40; i += 1) snap = r.engine.step();

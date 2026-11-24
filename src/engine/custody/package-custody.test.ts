@@ -3,6 +3,10 @@ import type { Package } from "../../types/simulation";
 import type { Result } from "../core/result";
 import {
   annotateCustody,
+  assignRescuer,
+  markRecoveryRequired,
+  resumeCustody,
+  transferCustody,
   createPackage,
   deliverPackage,
   departWithPackage,
@@ -91,5 +95,46 @@ describe("package custody", () => {
     expect(noted.holderRobotId).toBe("R-07");
     expect(noted.history).toHaveLength(picked.history.length + 1);
     expect(noted.history.slice(0, -1)).toEqual(picked.history);
+  });
+
+  describe("recovery after a holder failure", () => {
+    const stranded = () => {
+      let pkg = unwrap(reservePackage(fresh(), "R-01", 1));
+      pkg = unwrap(pickUpPackage(pkg, "R-01", "PK-01", 3));
+      pkg = unwrap(departWithPackage(pkg, "R-01", 4));
+      return unwrap(markRecoveryRequired(pkg, "R-01", 9, "motor failure"));
+    };
+
+    it("keeps the failed robot as holder and blocks every independent claim", () => {
+      const pkg = stranded();
+      expect(pkg.state).toBe("recovery-required");
+      expect(pkg.holderRobotId).toBe("R-01");
+      expect(pkg.location).toEqual({ kind: "robot", robotId: "R-01" });
+      expect(reservePackage(pkg, "R-02", 10).ok).toBe(false);
+      expect(pickUpPackage(pkg, "R-02", "PK-01", 10).ok).toBe(false);
+      expect(deliverPackage(pkg, "R-01", "DO-01", 10).ok).toBe(false);
+      expect(markRecoveryRequired(unwrap(reservePackage(fresh(), "R-01", 1)), "R-01", 2, "x").ok).toBe(false);
+    });
+
+    it("transfers custody atomically, only to the assigned rescuer", () => {
+      const pkg = stranded();
+      expect(transferCustody(pkg, "R-01", "R-02", 12, "RC-01").ok).toBe(false); // nobody assigned yet
+      const assigned = unwrap(assignRescuer(pkg, "RC-01", "R-02", 11, "R-02 dispatched"));
+      expect(transferCustody(assigned, "R-01", "R-03", 12, "RC-01").ok).toBe(false); // wrong robot
+      expect(transferCustody(assigned, "R-09", "R-02", 12, "RC-01").ok).toBe(false); // wrong holder
+      const moved = unwrap(transferCustody(assigned, "R-01", "R-02", 12, "RC-01"));
+      expect(moved).toMatchObject({ state: "in-transit", holderRobotId: "R-02", location: { kind: "robot", robotId: "R-02" }, recovery: null });
+      expect(transferCustody(moved, "R-01", "R-02", 13, "RC-01").ok).toBe(false); // exactly once
+      expect(unwrap(deliverPackage(moved, "R-02", "DO-01", 20)).state).toBe("delivered");
+      expect(moved.history.at(-1)?.note).toContain("R-01 → R-02");
+    });
+
+    it("lets a restored holder resume, and a rescuer cannot be the holder", () => {
+      const pkg = stranded();
+      expect(assignRescuer(pkg, "RC-01", "R-01", 10, "").ok).toBe(false);
+      expect(resumeCustody(pkg, "R-02", 15).ok).toBe(false);
+      const resumed = unwrap(resumeCustody(pkg, "R-01", 15));
+      expect(resumed).toMatchObject({ state: "in-transit", holderRobotId: "R-01", recovery: null });
+    });
   });
 });

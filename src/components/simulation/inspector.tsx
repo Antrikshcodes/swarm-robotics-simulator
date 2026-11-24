@@ -147,7 +147,7 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
             variant="destructive"
             size="sm"
             disabled={failed}
-            onClick={() => dispatch({ type: "fail-robot", robotId: robot.id, reason: "Marked failed by operator" })}
+            onClick={() => dispatch({ type: "fail_robot", robotId: robot.id, reason: "Marked failed by operator" })}
           >
             <PowerOff />
             {failed ? "Failed" : "Mark failed"}
@@ -524,7 +524,7 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
         </div>
         {kind ? <p className="mt-3 text-xs leading-snug text-text-secondary">{CELL_DESCRIPTION[kind]}</p> : null}
         {closure ? (
-          <Button variant="outline" size="sm" className="mt-3 w-full border-line" onClick={() => dispatch({ type: "reopen-aisle", closureId: closure.id })}>
+          <Button variant="outline" size="sm" className="mt-3 w-full border-line" onClick={() => dispatch({ type: "reopen_aisle", closureId: closure.id })}>
             <LockOpen />
             Reopen {closure.id}
           </Button>
@@ -533,7 +533,7 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
             variant="destructive"
             size="sm"
             className="mt-3 w-full"
-            onClick={() => dispatch({ type: "close-aisle", cells: [point], label: `Cell ${cellRef(point)} closed by operator` })}
+            onClick={() => dispatch({ type: "close_aisle", cells: [point], label: `Cell ${cellRef(point)} closed by operator` })}
           >
             <Lock />
             Close cell to traffic

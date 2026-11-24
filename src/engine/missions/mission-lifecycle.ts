@@ -11,8 +11,11 @@ import { err, ok, type Result } from "../core/result";
  * - `cancelled` is reachable only before pickup.
  * - `assigned` / `to-pickup` → `queued` (requeue) when the pickup becomes
  *   unusable before pickup, e.g. a failed robot is standing on the station.
- * - `recovery-required` is reachable from any active state when the robot
- *   fails. Recovery itself (reassignment, custody transfer) is Mission 004.
+ * - A robot failure before the package is picked up (`assigned`, `to-pickup`,
+ *   `picking-up`) requeues the mission for reassignment.
+ * - `recovery-required` is reached when the robot fails while the package is
+ *   on board. It returns to `carrying` once a rescuer has taken custody (or
+ *   the original robot is restored), so delivery resumes exactly once.
  * - `completed` and `cancelled` are terminal.
  */
 const ACTIVE: readonly MissionState[] = ["assigned", "to-pickup", "picking-up", "carrying", "to-dropoff", "dropping-off"];
@@ -21,18 +24,18 @@ const ALLOWED: Record<MissionState, readonly MissionState[]> = {
   queued: ["assigned", "cancelled"],
   assigned: ["to-pickup", "picking-up", "queued", "cancelled", "recovery-required"],
   "to-pickup": ["picking-up", "assigned", "queued", "cancelled", "recovery-required"],
-  "picking-up": ["carrying", "recovery-required"],
+  "picking-up": ["carrying", "queued", "recovery-required"],
   carrying: ["to-dropoff", "dropping-off", "recovery-required"],
   "to-dropoff": ["dropping-off", "carrying", "recovery-required"],
   "dropping-off": ["completed", "recovery-required"],
   completed: [],
   cancelled: [],
-  "recovery-required": [],
+  "recovery-required": ["carrying"],
 };
 
 export const isActiveMission = (state: MissionState): boolean => ACTIVE.includes(state);
 
-export const isTerminalMission = (state: MissionState): boolean => ALLOWED[state].length === 0;
+export const isTerminalMission = (state: MissionState): boolean => state === "completed" || state === "cancelled";
 
 export function canTransitionMission(from: MissionState, to: MissionState): boolean {
   return ALLOWED[from].includes(to);

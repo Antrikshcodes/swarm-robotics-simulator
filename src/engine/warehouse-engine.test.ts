@@ -110,7 +110,7 @@ describe("determinism, reset and seek", () => {
       run(e, 30);
       e.dispatch({ type: "add-mission", pickupStationId: "PK-01", dropoffStationId: "DO-02" });
       run(e, 20);
-      e.dispatch({ type: "close-aisle", cells: [{ x: 10, y: 5 }] });
+      e.dispatch({ type: "close_aisle", cells: [{ x: 10, y: 5 }] });
       return JSON.stringify(run(e, 200));
     };
     expect(drive()).toEqual(drive());
@@ -120,7 +120,7 @@ describe("determinism, reset and seek", () => {
     const e = engine("standard");
     const initial = JSON.stringify(e.getSnapshot());
     run(e, 25);
-    e.dispatch({ type: "fail-robot", robotId: "R-02" });
+    e.dispatch({ type: "fail_robot", robotId: "R-02" });
     e.reset();
     expect(JSON.stringify(e.getSnapshot())).toEqual(initial);
     expect(e.getCommandLog()).toHaveLength(0);
@@ -129,7 +129,7 @@ describe("determinism, reset and seek", () => {
   it("seek replays logged commands at their original ticks", () => {
     const e = engine("standard");
     run(e, 15);
-    e.dispatch({ type: "close-aisle", cells: [{ x: 13, y: 6 }, { x: 14, y: 6 }] });
+    e.dispatch({ type: "close_aisle", cells: [{ x: 13, y: 6 }, { x: 14, y: 6 }] });
     run(e, 60);
     const live = JSON.stringify(e.getSnapshot());
     e.seek(5);
@@ -141,10 +141,10 @@ describe("determinism, reset and seek", () => {
   it("a new command after seeking back discards the old future", () => {
     const e = engine("standard");
     run(e, 40);
-    e.dispatch({ type: "fail-robot", robotId: "R-01" });
+    e.dispatch({ type: "fail_robot", robotId: "R-01" });
     e.seek(10);
-    e.dispatch({ type: "fail-robot", robotId: "R-03" });
-    expect(e.getCommandLog().map((c) => c.command)).toEqual([{ type: "fail-robot", robotId: "R-03" }]);
+    e.dispatch({ type: "fail_robot", robotId: "R-03" });
+    expect(e.getCommandLog().map((c) => c.command)).toEqual([{ type: "fail_robot", robotId: "R-03" }]);
     const snap = run(e, 50);
     expect(snap.robots.find((r) => r.id === "R-01")?.status).not.toBe("failed");
   });
@@ -207,12 +207,12 @@ describe("commands", () => {
       [{ type: "add-mission", pickupStationId: "PK-09", dropoffStationId: "DO-01" }, "unknown-station"],
       [{ type: "add-mission", pickupStationId: "DO-01", dropoffStationId: "PK-01" }, "invalid-station-kind"],
       [{ type: "cancel-mission", missionId: "M-9999" }, "unknown-mission"],
-      [{ type: "close-aisle", cells: [] }, "empty-closure"],
-      [{ type: "close-aisle", cells: [{ x: 99, y: 0 }] }, "invalid-coordinates"],
-      [{ type: "close-aisle", cells: [{ x: 2, y: 1 }] }, "cell-not-closable"],
-      [{ type: "close-aisle", cells: [{ x: 0, y: 3 }] }, "cell-not-closable"],
-      [{ type: "reopen-aisle", closureId: "CL-42" }, "unknown-closure"],
-      [{ type: "fail-robot", robotId: "R-99" }, "unknown-robot"],
+      [{ type: "close_aisle", cells: [] }, "empty-closure"],
+      [{ type: "close_aisle", cells: [{ x: 99, y: 0 }] }, "invalid-coordinates"],
+      [{ type: "close_aisle", cells: [{ x: 2, y: 1 }] }, "cell-not-closable"],
+      [{ type: "close_aisle", cells: [{ x: 0, y: 3 }] }, "cell-not-closable"],
+      [{ type: "reopen_aisle", closureId: "CL-42" }, "unknown-closure"],
+      [{ type: "fail_robot", robotId: "R-99" }, "unknown-robot"],
     ] as const;
     for (const [command, code] of cases) {
       const result = e.dispatch(command);
@@ -222,10 +222,10 @@ describe("commands", () => {
     e.dispatch({ type: "start" });
     expect(e.dispatch({ type: "start" })).toMatchObject({ ok: false, error: { code: "already-running" } });
     expect(e.dispatch({ type: "step" })).toMatchObject({ ok: false, error: { code: "already-running" } });
-    e.dispatch({ type: "close-aisle", cells: [{ x: 5, y: 0 }] });
-    expect(e.dispatch({ type: "close-aisle", cells: [{ x: 5, y: 0 }] })).toMatchObject({ ok: false, error: { code: "already-closed" } });
-    e.dispatch({ type: "fail-robot", robotId: "R-01" });
-    expect(e.dispatch({ type: "fail-robot", robotId: "R-01" })).toMatchObject({ ok: false, error: { code: "robot-unavailable" } });
+    e.dispatch({ type: "close_aisle", cells: [{ x: 5, y: 0 }] });
+    expect(e.dispatch({ type: "close_aisle", cells: [{ x: 5, y: 0 }] })).toMatchObject({ ok: false, error: { code: "already-closed" } });
+    e.dispatch({ type: "fail_robot", robotId: "R-01" });
+    expect(e.dispatch({ type: "fail_robot", robotId: "R-01" })).toMatchObject({ ok: false, error: { code: "robot-unavailable" } });
   });
 
   it("add-mission queues a job that the scheduler delivers", () => {
@@ -261,16 +261,16 @@ describe("commands", () => {
     run(e, 7); // loaded and heading east along y = 0 or 1
     const robot = e.getSnapshot().robots[0];
     const blockers = [0, 1, 2].map((y) => ({ x: 6, y })).filter((p) => !(p.x === robot.position.x && p.y === robot.position.y));
-    const closed = e.dispatch({ type: "close-aisle", cells: blockers.slice(0, 2), label: "Spill" });
+    const closed = e.dispatch({ type: "close_aisle", cells: blockers.slice(0, 2), label: "Spill" });
     expect(closed.ok).toBe(true);
     const snap = run(e, 30);
     for (const record of snap.movements) {
       expect(blockers.slice(0, 2).some((p) => p.x === record.to.x && p.y === record.to.y)).toBe(false);
     }
-    expect(snap.events.some((ev) => ev.kind === "aisle-closed")).toBe(true);
+    expect(snap.events.some((ev) => ev.kind === "aisle_closed")).toBe(true);
     expect(snap.missions[0].state).toBe("completed");
     const id = closed.ok ? closed.value.entityId! : "";
-    expect(e.dispatch({ type: "reopen-aisle", closureId: id }).ok).toBe(true);
+    expect(e.dispatch({ type: "reopen_aisle", closureId: id }).ok).toBe(true);
     expect(e.getSnapshot().closures).toHaveLength(0);
   });
 
@@ -278,23 +278,23 @@ describe("commands", () => {
     const e = tiny();
     run(e, 6);
     const wall = [0, 1, 2].map((y) => ({ x: 7, y }));
-    const closed = e.dispatch({ type: "close-aisle", cells: wall });
+    const closed = e.dispatch({ type: "close_aisle", cells: wall });
     expect(closed.ok).toBe(true);
     let snap = run(e, 15);
     expect(snap.robots[0].status).toBe("waiting");
     expect(snap.events.some((ev) => ev.kind === "robot-no-path")).toBe(true);
     expect(snap.missions[0].state).toBe("carrying");
-    e.dispatch({ type: "reopen-aisle", closureId: closed.ok ? closed.value.entityId! : "" });
+    e.dispatch({ type: "reopen_aisle", closureId: closed.ok ? closed.value.entityId! : "" });
     snap = run(e, 20);
     expect(snap.missions[0].state).toBe("completed");
   });
 
-  it("fail-robot halts the robot, keeps custody and flags the mission for recovery", () => {
+  it("fail_robot halts the robot, keeps custody and flags the package for recovery", () => {
     const e = tiny();
     run(e, 8);
     const before = e.getSnapshot();
     expect(before.robots[0].packageId).not.toBeNull();
-    expect(e.dispatch({ type: "fail-robot", robotId: "R-01", reason: "Test fault" }).ok).toBe(true);
+    expect(e.dispatch({ type: "fail_robot", robotId: "R-01", reason: "Test fault" }).ok).toBe(true);
     const snap = run(e, 20);
     const robot = snap.robots[0];
     expect(robot.status).toBe("failed");
@@ -302,8 +302,11 @@ describe("commands", () => {
     expect(snap.missions[0].state).toBe("recovery-required");
     const pkg = snap.packages[0];
     expect(pkg.holderRobotId).toBe("R-01");
-    expect(["picked-up", "in-transit"]).toContain(pkg.state);
-    expect(pkg.history.at(-1)?.note).toMatch(/failed/);
+    expect(pkg.state).toBe("recovery-required");
+    expect(pkg.history.some((h) => h.to === "recovery-required" && /failed/.test(h.note))).toBe(true);
+    // A single-robot warehouse has nobody to send: recovery fails safely, custody unchanged.
+    expect(snap.recovery.tasks[0].status).toBe("failed");
+    expect(snap.events.some((ev) => ev.kind === "recovery_failed")).toBe(true);
     expect(pkg.history.length).toBeGreaterThan(3);
   });
 
@@ -311,7 +314,7 @@ describe("commands", () => {
     const e = engine("high-density");
     const snap = run(e, 40);
     expect(snap.robots.find((r) => r.id === "R-07")?.status).toBe("failed");
-    expect(snap.events.some((ev) => ev.kind === "robot-failed" && ev.robotId === "R-07" && ev.tick === 40)).toBe(true);
+    expect(snap.events.some((ev) => ev.kind === "robot_failed" && ev.robotId === "R-07" && ev.tick === 40)).toBe(true);
     const later = run(e, 300);
     expect(later.metrics.completedDeliveries).toBeGreaterThan(snap.metrics.completedDeliveries);
   });

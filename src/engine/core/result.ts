@@ -28,7 +28,16 @@ export type EngineErrorCode =
   | "not-running"
   | "invalid-tick"
   | "invalid-priority"
-  | "no-path";
+  | "no-path"
+  // Failure recovery (Mission 005)
+  | "invalid-failure-type"
+  | "robot-not-failed"
+  | "package-not-stranded"
+  | "holder-restoring"
+  | "recovery-in-progress"
+  | "no-rescuer"
+  | "rescuer-not-adjacent"
+  | "no-open-recovery";
 
 export interface EngineError {
   readonly code: EngineErrorCode;

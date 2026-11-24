@@ -5,8 +5,16 @@ import { err, ok, type Result } from "../core/result";
  * Authoritative package custody.
  *
  *   available ──reserve──▶ reserved ──pick up──▶ picked-up ──depart──▶ in-transit ──deliver──▶ delivered
- *        ▲                    │
- *        └──────release───────┘
+ *        ▲                    │                      │                    ▲   │
+ *        └──────release───────┘                      │      holder failed │   │
+ *                                                    └──────────▶ recovery-required
+ *                                                       handover / holder restored ──▶ in-transit
+ *
+ * `recovery-required`: the holder failed while carrying. Ownership stays
+ * with the failed robot (the package physically sits on it) until exactly
+ * one assigned rescuer takes it over through `transferCustody`, or the
+ * holder is restored and resumes (`resumeCustody`). Nobody else can reserve,
+ * pick up or deliver it in the meantime.
  *
  * Every function is pure: it returns a new Package or an explicit error and
  * appends to an append-only history. Invariants enforced here:
@@ -19,8 +27,9 @@ import { err, ok, type Result } from "../core/result";
 const ALLOWED: Record<PackageState, readonly PackageState[]> = {
   available: ["reserved"],
   reserved: ["available", "picked-up"],
-  "picked-up": ["in-transit", "delivered"],
-  "in-transit": ["delivered"],
+  "picked-up": ["in-transit", "delivered", "recovery-required"],
+  "in-transit": ["delivered", "recovery-required"],
+  "recovery-required": ["in-transit"],
   delivered: [],
 };
 
@@ -63,6 +72,7 @@ export function createPackage(params: {
     destinationStationId: params.destinationStationId,
     holderRobotId: null,
     location: { kind: "station", stationId: params.originStationId },
+    recovery: null,
     history: [
       { tick: params.tick, from: null, to: "available", robotId: null, note: `Registered at ${params.originStationId}` },
     ],
@@ -133,6 +143,70 @@ export function deliverPackage(pkg: Package, robotId: string, atStationId: strin
     holderRobotId: null,
     location: { kind: "delivered", stationId: atStationId },
     history: [...pkg.history, record(pkg, "delivered", tick, robotId, `Delivered by ${robotId} to ${atStationId}`)],
+  });
+}
+
+/** The carrying robot failed: the package needs recovery; custody stays with the failed robot. */
+export function markRecoveryRequired(pkg: Package, holderId: string, tick: number, reason: string): Result<Package> {
+  const bad = guard(pkg, "recovery-required") ?? requireHolder(pkg, holderId);
+  if (bad) return bad;
+  return ok({
+    ...pkg,
+    state: "recovery-required",
+    recovery: { failedRobotId: holderId, taskId: null, rescuerId: null },
+    history: [...pkg.history, record(pkg, "recovery-required", tick, holderId, `Holder ${holderId} failed (${reason}); custody retained pending recovery`)],
+  });
+}
+
+/**
+ * Assign (or clear, with null) the single robot allowed to take this package
+ * over. Custody does not change here.
+ */
+export function assignRescuer(pkg: Package, taskId: string, rescuerId: string | null, tick: number, note: string): Result<Package> {
+  if (pkg.state !== "recovery-required" || !pkg.recovery) {
+    return err("invalid-custody-transition", `${pkg.id} is ${pkg.state}; only recovery-required packages can be assigned a rescuer`);
+  }
+  if (rescuerId !== null && rescuerId === pkg.holderRobotId) {
+    return err("custody-conflict", `${rescuerId} already holds ${pkg.id}`);
+  }
+  return ok({
+    ...pkg,
+    recovery: { ...pkg.recovery, taskId, rescuerId },
+    history: [...pkg.history, { tick, from: pkg.state, to: pkg.state, robotId: rescuerId, note }],
+  });
+}
+
+/**
+ * Atomic handover from the failed holder to its assigned rescuer: holder,
+ * location and state change together in one record, so the package is never
+ * held by two robots or by none.
+ */
+export function transferCustody(pkg: Package, fromRobotId: string, toRobotId: string, tick: number, taskId: string): Result<Package> {
+  const bad = guard(pkg, "in-transit") ?? requireHolder(pkg, fromRobotId);
+  if (bad) return bad;
+  if (pkg.state !== "recovery-required" || pkg.recovery?.rescuerId !== toRobotId) {
+    return err("custody-conflict", `${toRobotId} is not the assigned rescuer for ${pkg.id}`);
+  }
+  return ok({
+    ...pkg,
+    state: "in-transit",
+    holderRobotId: toRobotId,
+    location: { kind: "robot", robotId: toRobotId },
+    recovery: null,
+    history: [...pkg.history, record(pkg, "in-transit", tick, toRobotId, `Custody transferred ${fromRobotId} → ${toRobotId} (${taskId})`)],
+  });
+}
+
+/** The failed holder was restored before any handover: it resumes carrying. */
+export function resumeCustody(pkg: Package, holderId: string, tick: number): Result<Package> {
+  const bad = guard(pkg, "in-transit") ?? requireHolder(pkg, holderId);
+  if (bad) return bad;
+  if (pkg.state !== "recovery-required") return err("invalid-custody-transition", `${pkg.id} is ${pkg.state}, not recovery-required`);
+  return ok({
+    ...pkg,
+    state: "in-transit",
+    recovery: null,
+    history: [...pkg.history, record(pkg, "in-transit", tick, holderId, `${holderId} restored; resumes carrying`)],
   });
 }
 

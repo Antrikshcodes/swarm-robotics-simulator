@@ -38,10 +38,11 @@ describe("mission lifecycle", () => {
     expect(transitionMission(walk(["assigned", "to-pickup", "picking-up"]), "cancelled", 4).ok).toBe(false);
   });
 
-  it("treats completed, cancelled and recovery-required as terminal", () => {
-    for (const terminal of ["completed", "cancelled", "recovery-required"] as const) {
+  it("treats completed and cancelled as terminal; recovery-required is not", () => {
+    for (const terminal of ["completed", "cancelled"] as const) {
       expect(isTerminalMission(terminal)).toBe(true);
     }
+    expect(isTerminalMission("recovery-required")).toBe(false);
     const done = walk(["assigned", "to-pickup", "picking-up", "carrying", "to-dropoff", "dropping-off", "completed"]);
     expect(transitionMission(done, "assigned", 20).ok).toBe(false);
   });
@@ -49,6 +50,17 @@ describe("mission lifecycle", () => {
   it("moves to recovery-required from any active state", () => {
     expect(transitionMission(walk(["assigned", "to-pickup", "picking-up", "carrying"]), "recovery-required", 5).ok).toBe(true);
     expect(transitionMission(base(), "recovery-required", 1).ok).toBe(false);
+  });
+
+  it("returns from recovery-required only to carrying (handover or restore), never to completed", () => {
+    const stranded = walk(["assigned", "to-pickup", "picking-up", "carrying", "to-dropoff", "recovery-required"]);
+    expect(transitionMission(stranded, "carrying", 9, { robotId: "R-09" }).ok).toBe(true);
+    expect(transitionMission(stranded, "completed", 9).ok).toBe(false);
+    expect(transitionMission(stranded, "queued", 9).ok).toBe(false);
+  });
+
+  it("requeues a mission whose robot failed while loading", () => {
+    expect(transitionMission(walk(["assigned", "to-pickup", "picking-up"]), "queued", 5).ok).toBe(true);
   });
 });
 
