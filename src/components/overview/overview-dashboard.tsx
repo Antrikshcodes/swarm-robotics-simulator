@@ -72,7 +72,7 @@ export function OverviewDashboard() {
           <PanelHeader title="Fleet" icon={<Bot />} description={`${m.totalRobots} robots registered in this scenario`} />
           <PanelBody className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
             <Stat label="Total robots" value={m.totalRobots} icon={<Bot />} />
-            <Stat label="Active" value={m.activeRobots} tone="cyan" icon={<Activity />} hint="Moving, handling or holding" />
+            <Stat label="Active" value={m.activeRobots} tone="cyan" icon={<Activity />} hint="Working or holding" />
             <Stat label="Idle" value={m.idleRobots} icon={<Clock />} hint="Parked or charging" />
             <Stat label="Failed" value={m.faultedRobots} tone={m.faultedRobots ? "red" : undefined} icon={<PowerOff />} hint="Halted by fault" />
           </PanelBody>
@@ -81,7 +81,7 @@ export function OverviewDashboard() {
           <PanelHeader title="Missions" icon={<Route />} description="Pickup → drop-off jobs" />
           <PanelBody className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
             <Stat label="Active" value={m.activeMissions} tone="cyan" icon={<Activity />} hint="To pickup or carrying" />
-            <Stat label="Pending" value={m.queuedMissions} icon={<ListTodo />} hint="Queued · no scheduler yet" />
+            <Stat label="Pending" value={m.queuedMissions} icon={<ListTodo />} hint="No scheduler yet" />
             <Stat label="Delivered" value={m.completedDeliveries} tone="lime" icon={<CheckCircle2 />} hint="Since tick 0" />
             <Stat label="Waiting" value={m.waitingMissions} tone={m.waitingMissions ? "amber" : undefined} icon={<Hourglass />} hint="Robot on hold" />
           </PanelBody>
