@@ -2,6 +2,21 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-24 — Mission 004: deadlock detection and recovery (`feat/mission-001-frontend`)
+
+### Added
+- `src/engine/deadlock`: wait-for graph (occupied / held / reserved edges, route lookahead) with Tarjan SCC cycle detection; `DeadlockManager` with persistence-confirmed detection, congestion and stall classification, deterministic yielder ranking, safe holding positions, cascading attempts, attempt budget and timeouts, safe failure and world-change retry.
+- Events `deadlock_detected`, `deadlock_group_identified`, `deadlock_recovery_started`, `robot_yielded`, `recovery_route_planned`, `deadlock_resolved`, `deadlock_recovery_failed`, each with tick, robots, incident, cell, action, attempt and status.
+- Snapshot `deadlocks` block; robot `waitClass` and `deadlockId`; `yielding` action; `deadlock` engine option (recovery on/off, thresholds).
+- Deadlock lab scenarios A–E; scenario `group` and robot `start` positions.
+- Studio: deadlock/recovering/yielding/congestion halos, red deadlock wait links, blocking cells, recovery route and holding cell; inspector wait state and incident card; chip deadlock status; grouped scenario picker.
+- Incidents: deadlock incidents with a detail view (lifecycle, wait-for group, recovery decisions, event sequence).
+- 49 new tests (141 total).
+
+### Changed
+- Right-of-way preemption is suspended for robots in a wait-for cycle or open deadlock incident, with a 12-tick per-pair cooldown.
+- Robots in a deadlock are reported once (as the deadlock incident), not also as blocked robots.
+
 ## 2026-11-24 — Mission 003: multi-robot coordination (`feat/mission-001-frontend`)
 
 ### Added

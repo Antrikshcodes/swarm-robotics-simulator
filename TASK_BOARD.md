@@ -93,6 +93,31 @@ Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review*
 - `npm run bench` — 0 commit rejections at 4, 8, 16, 24 and 32 robots; 0.15–1.17 ms/tick mean
 - Browser (1440×900): reservations, planned stops and priority flags in high-density; live wait (R-01 waiting for R-02) with arrow, inspector and decision log in narrow aisle; toolbar toggles; all routes render without console errors
 
+## Current milestone: Mission 004 — Deadlock detection and recovery
+
+Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review** pending independent review.
+
+| ID | Task | Status | Owner |
+|---|---|---|---|
+| M4-01 | Verify Mission 003 baseline (pushed, 92 tests, build) | Done | Claude Code |
+| M4-02 | Deadlock types, snapshot and event contract | Review | Claude Code |
+| M4-03 | Wait-for graph + Tarjan cycle detection + tests | Review | Claude Code |
+| M4-04 | Deadlock manager: persistence, congestion/stall classification, recovery attempts, cascade, bounds, safe failure + tests | Review | Claude Code |
+| M4-05 | Engine integration: deadlock tick phase, yield orders, holding-position search, `prepareRecovery`, `noPreempt`, world version | Review | Claude Code |
+| M4-06 | Deadlock lab scenarios A–E | Review | Claude Code |
+| M4-07 | Studio/inspector/incidents visualisation and incident detail view | Review | Claude Code |
+| M4-08 | Lint, typecheck, tests, build, browser verification | Done | Claude Code |
+| M4-09 | Independent review of Mission 004 | Todo | Codex |
+
+### M4-08 verification record
+
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` — passes (strict)
+- `npm test` — 141/141 passing across 12 files (wait-for graph 9, deadlock manager 13, deadlock engine 17, plus earlier suites), including lab scenarios A–E with per-tick invariant, collision, swap and teleport checks, determinism through seek, and 3 000-tick runs of every operational scenario (0 deadlocks)
+- `npm run build` — all routes prerendered
+- `npm run bench` — 0 commit rejections at 4–32 robots; 0.15–1.20 ms/tick mean with the deadlock phase
+- Browser (1440×900): Lab C recovery in progress (yielding halo, holding cell, recovery route, blocking cells, inspector card, chip); Lab B resolved incidents with lifecycle, decisions and event sequence; Lab E unresolved deadlock; no console errors after a clean reload
+
 ## Next milestones
 
 Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md).

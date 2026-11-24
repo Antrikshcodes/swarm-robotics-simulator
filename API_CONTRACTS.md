@@ -17,7 +17,7 @@ interface SimulationSource {
 }
 ```
 
-`createSimulationSource(scenarioId, { checkInvariants? })` builds one. Invariant checking defaults to on outside production builds and throws `InvariantViolation` on any breach.
+`createSimulationSource(scenarioId, { checkInvariants?, deadlock? })` builds one. `deadlock` accepts `{ recovery?, confirmTicks?, congestionTicks?, stallTicks?, maxAttempts?, attemptTimeout?, lookahead? }` (defaults: recovery on, 4, 3, 40, 3, 60, 6). Invariant checking defaults to on outside production builds and throws `InvariantViolation` on any breach.
 
 ## Command model
 
@@ -57,19 +57,36 @@ Scenario definitions may also schedule world commands at fixed ticks (e.g. the h
 - `coordination`:
   - `reservations`: `{ tick, x, y, robotId }` from the current tick onwards (current tick = present positions)
   - `holds`: `{ x, y, robotId, fromTick }` indefinite end-of-plan claims
-  - `waitGraph`: `{ robotId, waitingFor, ticks }` — input for deadlock detection (Mission 004)
+  - `waitGraph`: `{ robotId, waitingFor, ticks, cell?, reason? }` — the deadlock manager's wait-for graph (`reason`: `occupied` \| `held` \| `reserved`)
   - `decisions`: latest 120 `{ seq, tick, kind, robotId, otherRobotId?, cell?, message }` with kinds `wait`, `yield`, `preempt`, `replan`, `no-route`, `commit-reject`
   - `stats`: plans computed, nodes expanded, planned waits, right-of-way decisions, commit rejections, distance maps built, plans last tick
   - `horizon`: planning horizon in ticks
-- `metrics`: derived fleet and mission metrics
+- `deadlocks` (Mission 004):
+  - `incidents`: latest 40 `DeadlockIncident { id: "DL-nnnn", kind: "cycle" | "stall", status: "detected" | "recovering" | "resolved" | "failed", robots, dependents, edges, blockingCells, detectedTick, resolvedTick, attempts, failureReason }`
+  - each attempt: `RecoveryAttempt { attempt, yielderId, holdingCell, route, startedTick, endedTick, outcome, note }` with `outcome` one of `in-progress`, `resolved`, `escalated`, `no-holding-position`, `no-route`, `timeout`, `aborted`
+  - `stats`: `detected`, `resolved`, `failed`, `attempts`, `transientCycles`; `thresholds`; `recoveryEnabled`
+- robots also carry `waitClass` (`none` \| `waiting` \| `congestion` \| `deadlock` \| `recovering` \| `yielding`) and `deadlockId`; `action` may be `yielding`
+- `metrics`: derived fleet and mission metrics (`openIncidents` counts open deadlock incidents once; their robots are not also counted as blocked)
 
 Snapshots are new objects per change; earlier snapshots are never mutated (tested).
 
 ## Events
 
-`SimEvent { id, seq, tick, kind, severity, message, robotId?, missionId?, packageId?, stationId?, closureId? }`.
+`SimEvent { id, seq, tick, kind, severity, message, robotId?, missionId?, packageId?, stationId?, closureId?, robotIds?, incidentId?, attempt?, cell?, action?, status? }`.
 
-Kinds: `scenario-loaded`, `simulation-started`, `simulation-paused`, `mission-created`, `mission-assigned`, `mission-cancelled`, `mission-requeued`, `mission-recovery-required`, `right-of-way`, `conflict-prevented`, `pickup-started`, `package-picked-up`, `dropoff-started`, `package-delivered`, `robot-waiting`, `robot-replanned`, `robot-no-path`, `robot-failed`, `robot-charging`, `battery-low`, `aisle-closed`, `aisle-reopened`. (`robot-returning-home` is reserved.) Per-cell movement is recorded separately in `movements` to keep the event log readable.
+Kinds: `scenario-loaded`, `simulation-started`, `simulation-paused`, `mission-created`, `mission-assigned`, `mission-cancelled`, `mission-requeued`, `mission-recovery-required`, `right-of-way`, `conflict-prevented`, `pickup-started`, `package-picked-up`, `dropoff-started`, `package-delivered`, `robot-waiting`, `robot-replanned`, `robot-no-path`, `robot-failed`, `robot-charging`, `battery-low`, `aisle-closed`, `aisle-reopened`. (`robot-returning-home` is reserved.)
+
+Deadlock events (snake_case, Mission 004) always carry `tick`, `robotIds`, `incidentId`, `cell` (blocking or holding cell), `action`, `attempt` (0 before the first attempt) and `status`:
+
+| Kind | Action | Status |
+|---|---|---|
+| `deadlock_detected` | `open-incident` | `detected` |
+| `deadlock_group_identified` | `identify-group` / `extend-group` | `detected` |
+| `deadlock_recovery_started` | `select-yielder` | `recovering` |
+| `robot_yielded` | `yield-to-holding-position` (`robotId` = yielder) | `recovering` |
+| `recovery_route_planned` | `reserve-route-to-holding-position` | `recovering` |
+| `deadlock_resolved` | `resume` | `resolved` |
+| `deadlock_recovery_failed` | `hold-safely` | `failed` | Per-cell movement is recorded separately in `movements` to keep the event log readable.
 
 Engine event ids are deterministic for a given scenario and command sequence. Playback events (start/pause) are wall-clock history and are not replayed by seek.
 

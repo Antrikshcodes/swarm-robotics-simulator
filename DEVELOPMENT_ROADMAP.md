@@ -53,15 +53,21 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 - [x] Scaling benchmark (4–32 robots).
 - [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 004 — Deadlock handling and failure recovery
+## Mission 004 — Deadlock detection and autonomous recovery
 
-- [ ] Detect wait cycles on the wait-for graph and prolonged blocked dependencies after the commit phase.
-- [ ] Bounded, deterministic resolution (e.g. temporary priority inversion, backing a robot out, joint planning for the pair).
-- [ ] Test that congestion is not classified as deadlock.
-- [ ] Recover-robot command (`failed → recovering → idle`), custody transfer and reassignment of `recovery-required` missions.
-- [ ] Release a failed robot's permanent hold when it is recovered or towed.
+Status: implementation complete on `feat/mission-001-frontend`, awaiting independent review.
 
-Already in place from earlier missions: failure state modelling, custody preservation with audit history, dynamic aisle closures with route invalidation and replanning, no simulation reset required.
+- [x] Wait-for graph (occupied / held / reserved), cycle detection (Tarjan SCC) with all participants, after the commit phase.
+- [x] Persistence threshold separating deadlock from congestion; transient cycles counted, not reported; stall detection for robots with active missions.
+- [x] Bounded, deterministic recovery: candidate ranking, safe holding positions, reservation release, replanning, cascade, attempt budget and timeouts.
+- [x] Narrow-aisle handling: passage priority, convoy rule, controlled back-out, no back-and-forth (right-of-way suspended in cycles, reopen window).
+- [x] Safe failure: robots hold in place, `deadlock_recovery_failed`, retry only after world change.
+- [x] Seven deadlock events with tick, robots, cell, action, attempt and status.
+- [x] Studio, inspector and Incidents visualisation; deadlock lab scenarios A–E.
+- [x] Tests: graph, cycles, thresholds, false positives, selection, holding, release/replan, bounds, failure, custody, collisions, swaps, determinism, long runs.
+- [ ] Independent review (Codex) and resolution of findings.
+
+Not in Mission 004 (moved to a later mission): recover-robot command (`failed → recovering → idle`), custody transfer and reassignment of `recovery-required` missions, releasing a failed robot's permanent hold.
 
 ## Mission 005 — Metrics, polish, and judging scenarios
 

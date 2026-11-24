@@ -6,12 +6,12 @@ SWARM is an autonomous multi-robot warehouse coordination and simulation platfor
 
 ## Project status
 
-**Phase:** Mission 003 — multi-robot coordination (in review)
+**Phase:** Mission 004 — deadlock detection and recovery (in review)
 **Problem statement:** NexHack 2.0 — PS 05
 **Repository:** [Antrikshcodes/swarm-robotics-simulator](https://github.com/Antrikshcodes/swarm-robotics-simulator)
-**Working branch:** `feat/mission-001-frontend` (Missions 001–002; not merged to `main`)
+**Working branch:** `feat/mission-001-frontend` (Missions 001–004; not merged to `main`)
 
-The Simulation Studio is driven by a **deterministic, command-driven engine** with **reservation-based multi-robot coordination**: robots plan cooperatively in space and time over a shared table of cell and edge reservations, wait or detour instead of colliding, and resolve competition by mission priority. Deadlock detection/recovery and automatic failure recovery are **not implemented yet** (Mission 004).
+The Simulation Studio is driven by a **deterministic, command-driven engine** with **reservation-based multi-robot coordination**: robots plan cooperatively in space and time over a shared table of cell and edge reservations, wait or detour instead of colliding, and resolve competition by mission priority. **Deadlocks** (circular waits, narrow-aisle standoffs, stalled robots) are detected on a wait-for graph, told apart from ordinary congestion, and recovered autonomously by a bounded, deterministic yield-to-holding-position strategy. Automatic *robot-failure* recovery (repair, custody transfer) is not implemented yet.
 
 ## What works today
 
@@ -19,14 +19,16 @@ The Simulation Studio is driven by a **deterministic, command-driven engine** wi
 |---|---|
 | Shell | Persistent sidebar (collapsible, persisted), top bar with breadcrumb, scenario selector, playback status, alerts menu, operator menu |
 | Overview `/` | Fleet and mission KPIs, live warehouse preview, active alerts, fleet activity, recent events |
-| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, closures, robots, reserved cells, planned stops, wait-for arrows, priority flags, rulers); coordination chip and panel; select/pan, zoom, fit, reset, overlay toggles; inspector for robots (task, route, custody trail, **mark failed**), stations (**queue mission**) and cells (**close / reopen**); play/pause/step/reset, 0.5–4× speed, seekable timeline, event strip; keyboard shortcuts |
+| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, closures, robots, reserved cells, planned stops, wait-for arrows, priority flags, rulers, **deadlock halos, blocking cells, recovery routes and holding positions**); coordination chip and panel with deadlock status; scenario picker grouped into Operations and Deadlock lab; select/pan, zoom, fit, reset, overlay toggles; inspector for robots (task, route, custody trail, **mark failed**), stations (**queue mission**) and cells (**close / reopen**); play/pause/step/reset, 0.5–4× speed, seekable timeline, event strip; keyboard shortcuts |
 | Fleet `/fleet` | Status-filtered robot roster, inspect-in-studio |
 | Missions `/missions` | Lifecycle KPIs, **new-mission form**, state-filtered log with custody column and **cancel** |
-| Incidents `/incidents` | Derived incident queue (failed robots, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure |
+| Incidents `/incidents` | Derived incident queue (deadlocks, failed robots, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure; **deadlock detail** with lifecycle, wait-for group, recovery decisions and event sequence |
 | Analytics `/analytics` | Throughput (chart + table), cycle time, utilisation, per-robot time allocation |
 | Settings `/settings` | Tick duration, motion smoothing, canvas overlays, compact sidebar, shortcut reference |
 
 Three scenarios ship: **Standard warehouse** (5 robots, seeded feed with high/urgent missions), **Narrow aisle** (opposing missions compete for a one-cell passage; robots reserve it in turn or take a bypass), and **High-density warehouse** (8 robots, heavy feed, R-07 failed on a dock at tick 40 — its station's missions are held and requeued).
+
+Five **Deadlock lab** scenarios demonstrate Mission 004: **A** two-robot head-on deadlock, **B** three-robot circular wait (cascading recovery), **C** narrow-aisle standoff against a convoy, **D** temporary congestion (must *not* be reported as deadlock), **E** unrecoverable deadlock (safe failure).
 
 ### What the engine does
 
@@ -35,6 +37,7 @@ Three scenarios ship: **Standard warehouse** (5 robots, seeded feed with high/ur
 - **Scheduling:** missions (normal / high / urgent) queue from the scenario, a seeded feed, or the UI; the most urgent go first to the nearest available robot. Missions whose station is blocked by a failed robot are requeued. Idle robots return home; low-battery robots seek a free charger.
 - **Lifecycles:** validated mission states (`queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed`, plus `cancelled`, `recovery-required`) and package custody (`available → reserved → picked-up → in-transit → delivered`) with append-only history.
 - **Safety:** no two robots in a cell and no head-on swaps — prevented when planning and re-checked at commit (0 commit-time rejections in every shipped scenario and benchmark). `checkInvariants()` runs after every tick and command outside production builds.
+- **Deadlocks:** a wait-for graph (occupied / held / reserved cells on each waiting robot's route) is built every tick; strongly connected components are circular waits. A cycle is confirmed only after it persists 4 ticks with every member waiting, so congestion is never misreported. Recovery ranks the group deterministically (passage priority, convoy size, urgency, cargo, wait time, ID), sends the yielder to the nearest safe holding position off everyone else's route through the normal reservation table, cascades if a residual cycle remains, and is bounded (3 attempts, timeouts). If no safe option exists the robots hold in place and `deadlock_recovery_failed` is emitted. Recovery never teleports, resets, deletes missions or touches custody.
 - **Commands:** start, pause, step, reset, load scenario, select robot, add / cancel mission, close / reopen aisle, mark robot failed — each returns an explicit success or error, shown as a toast.
 - **Determinism:** same scenario + same command sequence ⇒ identical snapshots. The timeline seeks by replaying the command log.
 
@@ -95,13 +98,14 @@ src/
   engine/              pure TypeScript simulation engine (no React, DOM, timers or Math.random)
     warehouse-engine.ts  WarehouseEngine: tick loop, scheduler, movement, commands, events, snapshots
     coordination/      reservation table, space-time A*, distance maps, coordinator, commit resolver
+    deadlock/          wait-for graph (Tarjan SCC) and deadlock manager (detection, recovery)
     pathfinding/       spatial A* + min-heap
     custody/           package custody state machine
     missions/ robots/  lifecycle state machines
     world/layout.ts    ASCII warehouse parser and grid helpers
     core/              Result types, seeded PRNG
     commands.ts invariants.ts metrics.ts scenario.ts
-    scenarios/         standard, narrow-aisle, high-density
+    scenarios/         standard, narrow-aisle, high-density, deadlock-lab (A–E)
   lib/
     render/            Canvas theme + pure warehouse renderer
     selectors.ts       derived incidents and analytics
@@ -114,7 +118,8 @@ src/
 
 - **Engine/UI boundary.** `src/engine` owns all world state. The UI reads immutable snapshots (`src/types/simulation.ts`) and sends commands through `dispatch()`. A remote engine could implement the same `SimulationSource` interface.
 - **Explicit results.** Commands, custody transitions, lifecycle transitions and pathfinding return success/error values; internal impossibilities throw `InvariantViolation`.
-- **Fixed tick order** (scheduled commands → feed → assignment → robots in ID order → logged commands → invariants) makes runs reproducible.
+- **Fixed tick order** (scheduled commands → feed → assignment → prepare → coordinate → commit → apply → deadlocks → logged commands → invariants) makes runs reproducible.
+- **Deadlock recovery only changes goals and planning order.** Yielding goes through the same reservations and commit check as every other move, so recovery cannot break safety invariants. Right-of-way is suspended for robots in a wait-for cycle so the two mechanisms never fight.
 - **Two safety layers.** Reservations prevent conflicts when planning; `resolveMoves` re-checks every committed move independently. Planning bugs show up as counted, evented commit rejections, never as collisions.
 - **Replan only what changed.** Robots keep their reservations until their goal changes, their plan is invalidated or nearly exhausted, so cost grows with activity, not fleet size squared (see the benchmark in ARCHITECTURE.md).
 - **Time is owned outside the engine.** `PlaybackDriver` turns wall-clock time into `step()` calls; the engine has no timers.
@@ -122,7 +127,7 @@ src/
 
 ## Known limitations
 
-- **No deadlock detection or recovery policy.** Prioritised planning is not complete: two robots that each need the other's cell (e.g. goals equal to each other's positions in a one-lane corridor) both wait. The shipped scenarios avoid this geometry and are tested for bounded blocking; general handling is Mission 004.
+- **Deadlock recovery is heuristic, not complete.** It resolves circular waits by having one robot (or a cascade of robots) yield to a safe holding position; it does not do joint multi-robot planning. Geometries with no safe holding position (Lab E) are detected and reported as unresolved rather than solved. Stalls behind a failed robot cannot be cleared until robot recovery exists.
 - **No automatic failure recovery.** A failed robot keeps its package, its mission becomes `recovery-required`, and it permanently blocks its cell; there is no repair or custody-transfer command yet.
 - Assignment is greedy nearest-robot by priority; no deadlines, batching or global optimisation.
 - Planning horizon is 48 ticks; longer routes are planned in windows.

@@ -21,8 +21,9 @@ Status legend: **Enforced** = implemented and checked by `checkInvariants()` aft
 6. Coordinate: prioritised space-time planning over the reservation table
 7. Commit: the whole fleet's intended moves are checked together
 8. Apply moves, arrivals and waits
-9. User commands logged at this tick (only during seek replay)
-10. Invariant check
+9. Deadlock phase: wait-for graph, cycle confirmation, recovery attempts (goal and planning-order changes only, applied from the next tick)
+10. User commands logged at this tick (only during seek replay)
+11. Invariant check
 
 ## Robot occupancy and movement
 
@@ -52,7 +53,7 @@ Status legend: **Enforced** = implemented and checked by `checkInvariants()` aft
 
 ### Known limits of prioritised planning
 
-Prioritised cooperative planning is not complete. If two robots each need the cell the other occupies (e.g. goals equal to each other's current cells in a one-lane corridor), neither can find a plan and both wait. The shipped scenarios never create this geometry (goals are stations or homes), and 2 000-tick tests assert bounded blocking for them, but general deadlock detection and resolution is **Planned (Mission 004)**. The wait-for graph (`snapshot.coordination.waitGraph`) is exposed for it.
+Prioritised cooperative planning is not complete. If two robots each need the cell the other occupies (e.g. goals equal to each other's current cells in a one-lane corridor), neither can find a plan and both wait. Since Mission 004 such circular waits are detected and recovered by the deadlock manager (see *Deadlock handling*); the operational scenarios still never create them (0 deadlocks in 3 000-tick runs).
 
 ## Mission lifecycle
 
@@ -114,12 +115,52 @@ Rules:
 
 Drain 0.04 % per move, 0.01 % per handling tick, 0.004 % per idle/waiting tick; +1 % per tick on a charger (starts below 95 %, continues to 100 %). Robots below 25 % with no mission go to a free charger; robots below 15 % are not assigned missions; `battery-low` fires below 20 %. This is a demonstration model, not a physical one.
 
-## Deadlock handling
+## Deadlock handling — **Implemented (Mission 004)**
 
-- Distinguish temporary waiting from deadlock. — **Planned (Mission 004)**. Today waits are planned (space-time) and bounded in the shipped scenarios by priority, aging and right-of-way; the wait-for graph is exposed for detection.
-- Record blocked dependencies and duration. — **Implemented** (`waitingFor`, `blockedTicks`, wait-for graph, decision log).
-- Recovery must be bounded and deterministic for the same state. — Current replanning is deterministic; bounded deadlock recovery is **Planned**.
-- Never resolve deadlock by violating collision or package-custody invariants. — **Enforced**.
+Code: `src/engine/deadlock/` (`wait-for-graph.ts`, `deadlock-manager.ts`), integrated as a tick phase after moves are applied.
+
+### Detection
+
+- **Wait-for graph.** Built every tick over robots that are *waiting* and not at their goal. An edge A → B means A cannot progress because B occupies (`occupied`) or holds the end-of-plan claim on (`held`) one of the next 6 cells of A's static route, or because the coordinator reports B owns the reservation A waits on (`reserved`). A robot may have several out-edges. On a 4-connected grid two robots can only block each other directly in pairs (the grid graph is bipartite), so circular waits of three or more robots appear only through this route lookahead.
+- **Cycles** are strongly connected components with ≥ 2 robots (Tarjan), listed deterministically. Every participant is identified.
+- **Deadlock vs congestion.** A cycle becomes a deadlock only when the same group has persisted for `confirmTicks` = 4 consecutive ticks *and* every member has itself waited ≥ 4 ticks. Cycles that clear sooner are counted as `transientCycles` and never reported. A wait chain without a cycle (waiting behind traffic that is still moving) is never a deadlock; robots waiting ≥ 3 ticks in a chain are classified as `congestion`.
+- **Stall.** A robot with an active mission that has waited ≥ `stallTicks` = 40 ticks without being in a cycle opens a `stall` incident with its blocker chain (e.g. behind a parked robot).
+- **Growth.** If another robot joins an open (unrecovered) circular wait, the incident is extended to the larger group rather than closed.
+- Robot wait classes: `none`, `waiting` (short planned wait), `congestion`, `deadlock`, `recovering` (in a group while another robot yields), `yielding`.
+
+### Recovery
+
+1. **Candidate ranking (deterministic).** Each member gets a score; the lowest score yields first. Score = +1000 if the robot is inside a narrow passage (directional passage priority: the robot already in the passage keeps going), +100 per robot outside the group queued behind it (convoys keep priority), + mission urgency weight, +5 if carrying, + min(wait ticks, 30). Ties: the higher robot ID yields.
+2. **Holding position.** For the first candidate in order: breadth-first search (N, E, S, W) from its cell through traversable, non-station cells not occupied by other robots, up to depth 30, for the nearest cell that is not *protected* and where the candidate can legally hold. Protected = every other member's and dependent's current cell and full static route to its goal. This is the controlled back-out: a robot backs up only when the holding cell is off everyone else's path.
+3. **Attempt.** The group's future reservations are released and its plans invalidated; the other members claim their current cells; the yielder's goal becomes the holding cell and it plans first (`recoveryFirst`) through the normal reservation table, then the others. Events: `deadlock_recovery_started`, `robot_yielded`, then `recovery_route_planned` once the yielder holds a complete reserved route.
+4. **Resolution.** The incident is resolved when the yielder has held its position for ≥ 2 ticks and the others have progressed ≥ 3 cells (or reached their goals). All yielders are then released together and resume their own goals (`deadlock_resolved`).
+5. **Cascade.** If a residual cycle among the remaining members persists for `confirmTicks` while the yielder holds, the attempt is `escalated`: the yielder keeps holding and the next attempt selects another yielder from the remaining members.
+6. **Bounds.** At most `maxAttempts` = 3 attempts per budget; an attempt fails with `no-route` if the yielder cannot reserve a complete route within 2 ticks, or `timeout` after 60 ticks. A group re-detected within 60 ticks of resolution reopens the same incident and keeps its attempt count, so recovery cannot oscillate forever.
+7. **Failure.** If no candidate has a safe holding position, or the budget is exhausted, the incident becomes `failed`: `deadlock_recovery_failed` is emitted once, yielders are released, and all members stay in place in a safe waiting state. A failed incident is retried with a fresh budget only when the world changes (mission added/cancelled, closure added/removed, robot failed); if the cycle dissolves on its own it is resolved.
+
+### Separation from right-of-way
+
+Mission 003's right-of-way preemption is suspended for robots that are in any wait-for cycle or open deadlock incident (`noPreempt`). Cycles are owned by the deadlock manager alone, which prevents the two mechanisms from undoing each other's decisions (back-and-forth). A per-pair right-of-way cooldown of 12 ticks bounds repeated preemption elsewhere.
+
+### Safety guarantees
+
+Recovery never teleports a robot, resets the simulation, deletes or cancels missions, changes package custody, or bypasses the reservation table: it only changes a robot's *goal* and the *planning order*. Every move still goes through space-time planning and the commit-time check, so the collision, swap and custody invariants are enforced (and tested every tick in the lab scenarios).
+
+### Deadlock lab scenarios
+
+| ID | Demonstrates |
+|---|---|
+| `lab-a-two-robot` | Two robots meet head-on in a one-lane corridor; one backs into a side bay. |
+| `lab-b-three-robot` | Three-robot circular wait at a cross junction; cascading recovery (two yielders). |
+| `lab-c-narrow-aisle` | One eastbound vs a westbound convoy in a narrow passage; passage priority + convoy rule pick the yielder. A fourth robot keeps delivering. |
+| `lab-d-congestion` | Four robots queue through a door: congestion only, zero deadlock reports. |
+| `lab-e-unrecoverable` | Sealed corridor with no holding position: `deadlock_recovery_failed`, robots hold safely. |
+
+### Limits
+
+- Prioritised planning is still not complete; recovery is a heuristic yield/hold strategy, not joint multi-robot planning. Geometries with no safe holding position (Lab E) are reported, not solved.
+- Stall incidents are recovered only through the robots in the blocker chain; a failed robot cannot be moved (robot recovery/towing is out of scope).
+- Partial plans can still park a robot in a junction; the cascade handles the resulting residual cycles within the attempt budget.
 
 ## Metrics
 
