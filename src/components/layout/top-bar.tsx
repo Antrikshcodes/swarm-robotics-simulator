@@ -36,7 +36,7 @@ export function TopBar() {
           <span>{item.section}</span>
         </nav>
         <div className="flex items-baseline gap-2.5">
-          <h1 className="truncate text-[15px] leading-tight font-semibold tracking-tight">{item.label}</h1>
+          <h1 className="font-display truncate text-[16px] leading-tight font-bold tracking-tight text-foreground">{item.label}</h1>
           <span className="hidden truncate text-xs text-text-secondary xl:inline">{item.description}</span>
         </div>
       </div>

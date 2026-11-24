@@ -39,7 +39,7 @@ export function Sidebar() {
       >
         <SwarmMark />
         <div className={cn("min-w-0 leading-none", labelClass)}>
-          <div className="font-mono text-[13px] font-semibold tracking-[0.22em] text-foreground">SWARM</div>
+          <div className="font-display text-[14px] font-bold tracking-[0.22em] text-foreground">SWARM</div>
           <div className="mt-1 truncate text-[10.5px] text-text-secondary">Robot Coordination Arena</div>
         </div>
       </Link>

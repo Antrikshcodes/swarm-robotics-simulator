@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { DataStrip, Eyebrow, FadeUp, PrimaryButton, RevealLines } from "./motion-primitives";
 
 export interface FinalCTAProps {
   onEnterWarehouse: () => void;
@@ -10,94 +9,45 @@ export interface FinalCTAProps {
 
 export function FinalCTA({ onEnterWarehouse, isTransitioning }: FinalCTAProps) {
   return (
-    <section
-      id="final"
-      className="relative min-h-screen w-full flex flex-col justify-between py-24 px-6 md:px-12 lg:px-20 border-t border-[#141414]/9 overflow-hidden"
-    >
-      <div className="max-w-4xl mx-auto w-full my-auto text-center flex flex-col items-center z-10">
-        {/* Section tag */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#141414]/10 bg-[#141414]/5 mb-6"
-        >
-          <span className="size-2 rounded-full bg-[#B7F34A] animate-ping" />
-          <span className="font-mono text-[10.5px] tracking-[0.2em] uppercase text-[#141414]/80">
-            SIMULATION READY · ONLINE
-          </span>
-        </motion.div>
+    <section id="final" className="relative flex min-h-dvh w-full flex-col justify-between border-t border-white/[0.06] px-6 pt-28 pb-10 md:px-12 lg:px-20">
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[#080B0D]/80 lg:hidden" />
+      <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 hidden w-[62%] bg-gradient-to-r from-[#080B0D]/92 via-[#080B0D]/60 to-transparent lg:block" />
 
-        {/* Big Headline */}
-        <motion.h2
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-          className="text-5xl sm:text-7xl xl:text-8xl font-black tracking-[-0.04em] text-[#141414] leading-[0.92] mb-6"
-        >
-          READY TO ENTER <br />
-          THE WAREHOUSE?
-        </motion.h2>
-
-        {/* Subtitle */}
-        <motion.p
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.7, delay: 0.2 }}
-          className="text-lg sm:text-2xl text-[#141414]/70 max-w-xl mx-auto mb-10 leading-relaxed font-normal"
-        >
-          See autonomous coordination in action.
-          Experience deterministic pathfinding, live collision avoidance, and automated failure recovery.
-        </motion.p>
-
-        {/* Big Action Button */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          className="relative inline-block"
-        >
-          {/* Subtle outer glow ring */}
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[#40C8E8] to-[#B7F34A] opacity-30 blur-lg transition duration-500 group-hover:opacity-75" />
-
-          <button
-            type="button"
-            disabled={isTransitioning}
-            onClick={onEnterWarehouse}
-            className="group relative inline-flex items-center gap-4 px-10 py-5 rounded-2xl bg-[#141414] text-[#EFECE6] font-mono text-sm sm:text-base font-bold tracking-wider uppercase transition-all duration-300 hover:bg-[#20272B] hover:shadow-2xl active:scale-95 disabled:opacity-50 cursor-pointer shadow-xl shadow-[#141414]/20"
-          >
-            <span>ENTER WAREHOUSE</span>
-            <div className="size-8 rounded-full bg-[#EFECE6]/10 flex items-center justify-center transition-transform group-hover:translate-x-1 group-hover:bg-[#40C8E8] group-hover:text-[#090D10]">
-              <ArrowRight className="size-4 text-[#40C8E8] group-hover:text-[#090D10] transition-colors" />
-            </div>
-          </button>
-        </motion.div>
-
-        {/* Secondary Technical Tag */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="mt-6 font-mono text-xs tracking-[0.2em] text-[#141414]/50 uppercase"
-        >
-          SWARM ROBOTICS COORDINATION PLATFORM
-        </motion.div>
+      <div className="relative z-10 my-auto w-full max-w-2xl lg:w-[46%] lg:max-w-none">
+        <Eyebrow index="07" label="Simulation ready" className="mb-6" />
+        <RevealLines
+          lines={["Ready to enter", <span key="w" className="bg-gradient-to-r from-[#40C8E8] to-[#B7F34A] bg-clip-text text-transparent">the warehouse?</span>]}
+          className="font-display text-[clamp(2.75rem,5.4vw,5.75rem)] leading-[0.92] font-bold tracking-[-0.05em] text-[#F2F4F3] uppercase"
+        />
+        <FadeUp delay={0.3}>
+          <p className="mt-6 max-w-[32rem] text-[17px] leading-[1.6] text-[#B4BFC4] sm:text-lg">
+            See autonomous coordination in action: deterministic pathfinding, live collision avoidance and automated failure
+            recovery.
+          </p>
+        </FadeUp>
+        <FadeUp delay={0.45} className="mt-10">
+          <PrimaryButton onClick={onEnterWarehouse} disabled={isTransitioning} className="h-14 px-8 text-[13px]">
+            Enter warehouse
+          </PrimaryButton>
+        </FadeUp>
+        <DataStrip
+          className="mt-12"
+          cells={[
+            { value: "Simulation online", dot: "#B7F34A" },
+            { label: "Engine", value: "Deterministic" },
+            { label: "Invariants", value: "Checked every tick", tone: "#40C8E8" },
+          ]}
+        />
       </div>
 
-      {/* Footer Branding Bar */}
-      <footer className="pt-8 border-t border-[#141414]/9 flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-[11px] text-[#141414]/60 z-10">
+      <footer className="relative z-10 flex flex-col items-start justify-between gap-3 border-t border-white/[0.08] pt-6 font-mono text-[10.5px] tracking-[0.14em] text-[#7E8C93] uppercase sm:flex-row sm:items-center">
         <div className="flex items-center gap-2">
-          <span className="font-bold text-[#141414]">SWARM</span>
-          <span>{"//"} WAREHOUSE ROBOT COORDINATION ARENA</span>
+          <span className="font-semibold text-[#F2F4F3]">SWARM</span>
+          <span>{"//"} Warehouse robot coordination arena</span>
         </div>
         <div className="flex items-center gap-6">
-          <span>NEXHACK 2.0</span>
-          <span>ZERO COLLISIONS GUARANTEED</span>
+          <span>NexHack 2.0</span>
+          <span className="text-[#B7F34A]">Zero collisions</span>
         </div>
       </footer>
     </section>

@@ -36,7 +36,7 @@ export function EnterWarehouseTransition({ active, onComplete }: EnterWarehouseT
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.6 }}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#090D10]/95 backdrop-blur-xl text-[#E3E9EC] select-none"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#080B0D] text-[#F2F4F3] select-none"
     >
       {/* Laser Scanning Grid Line */}
       <motion.div

@@ -19,7 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <TooltipProvider>
           <div
             id="landing-scroll-root"
-            className="h-dvh w-full overflow-y-auto overflow-x-hidden bg-[#EFECE6] text-[#141414] selection:bg-[#40C8E8]/30 scroll-smooth"
+            className="h-dvh w-full overflow-y-auto overflow-x-hidden bg-[#080B0D] text-[#F2F4F3] selection:bg-[#40C8E8]/20 scroll-smooth"
           >
             {children}
           </div>
