@@ -62,6 +62,7 @@ export const ROBOT_ACTION: Record<RobotAction, string> = {
   "travel-to-dropoff": "Travelling to drop-off",
   "return-home": "Returning home",
   "travel-to-charger": "Heading to charger",
+  yielding: "Yielding (deadlock recovery)",
   loading: "Loading",
   unloading: "Unloading",
   charging: "Charging",

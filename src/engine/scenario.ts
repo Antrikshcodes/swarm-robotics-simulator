@@ -15,8 +15,10 @@ export interface RobotSpec {
   readonly id: string;
   readonly model: string;
   readonly colorIndex: number;
-  /** Start cell and parking spot when the robot has no work. */
+  /** Parking spot when the robot has no work. */
   readonly home: GridPoint;
+  /** Start cell if different from home (the robot then heads home). */
+  readonly start?: GridPoint;
   readonly heading: Heading;
   readonly battery: number;
 }
@@ -46,6 +48,8 @@ export interface ScheduledCommand {
 
 export interface ScenarioDefinition {
   readonly id: string;
+  /** Selector grouping: operational scenarios or the deadlock lab. */
+  readonly group?: "operations" | "lab";
   readonly name: string;
   readonly summary: string;
   readonly focus: string;
@@ -81,6 +85,7 @@ export function compileScenario(definition: ScenarioDefinition): CompiledScenari
   const ctx = definition.id;
   const ids = new Set<string>();
   const homes = new Set<string>();
+  const starts = new Set<string>();
 
   for (const robot of definition.robots) {
     const where = `${ctx}/${robot.id}`;
@@ -95,6 +100,14 @@ export function compileScenario(definition: ScenarioDefinition): CompiledScenari
     const key = pointKey(robot.home);
     if (homes.has(key)) throw new Error(`${where}: home cell shared with another robot`);
     homes.add(key);
+    if (robot.start) {
+      if (!inBounds(layout, robot.start) || !isTraversable(layout, robot.start)) throw new Error(`${where}: start is not a traversable cell`);
+      const startKind = cellKindAt(layout, robot.start);
+      if (startKind === "pickup" || startKind === "dropoff") throw new Error(`${where}: robots may not start on a pickup/drop-off station`);
+    }
+    const startKey = pointKey(robot.start ?? robot.home);
+    if (starts.has(startKey)) throw new Error(`${where}: start cell shared with another robot`);
+    starts.add(startKey);
     if (robot.battery < 0 || robot.battery > 100) throw new Error(`${where}: battery must be 0–100`);
   }
 

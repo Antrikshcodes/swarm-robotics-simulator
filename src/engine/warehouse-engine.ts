@@ -40,6 +40,7 @@ import { BLOCKED_ALERT_TICKS, LOW_BATTERY_THRESHOLD, computeMetrics } from "./me
 import { createMission, isActiveMission, transitionMission } from "./missions/mission-lifecycle";
 import { Coordinator, type CoordMode, type RobotCoordination } from "./coordination/coordinator";
 import { resolveMoves } from "./coordination/move-resolver";
+import { DeadlockManager, type DeadlockOptions } from "./deadlock/deadlock-manager";
 import type { PlanningGrid } from "./coordination/space-time-planner";
 import { validateRobotTransition } from "./robots/robot-lifecycle";
 import type { CompiledScenario, MissionSpec, RobotSpec } from "./scenario";
@@ -63,6 +64,8 @@ export interface SimulationSource {
 export interface EngineOptions {
   /** Run checkInvariants after every mutation and throw on violation. */
   readonly checkInvariants?: boolean;
+  /** Deadlock detection / recovery settings (recovery on by default). */
+  readonly deadlock?: DeadlockOptions;
 }
 
 // ---------------------------------------------------------------- tuning
@@ -108,7 +111,7 @@ interface RobotRuntime {
   stats: { movingTicks: number; waitingTicks: number; busyTicks: number; distance: number; deliveries: number; replans: number };
 }
 
-type TargetKind = "pickup" | "dropoff" | "home" | "charger";
+type TargetKind = "pickup" | "dropoff" | "home" | "charger" | "hold";
 
 interface Target {
   readonly kind: TargetKind;
@@ -170,6 +173,14 @@ export class WarehouseEngine implements SimulationSource {
   private grid!: PlanningGrid;
   /** Movement target per robot for the current tick (set in prepare). */
   private currentTarget = new Map<string, Target>();
+  private readonly deadlockOptions: DeadlockOptions;
+  private deadlocks!: DeadlockManager;
+  /** Active yield orders: robot → holding cell (deadlock recovery). */
+  private yields = new Map<string, { incidentId: string; holdingCell: number }>();
+  /** Yielders that must be planned first on the next tick. */
+  private freshYields = new Set<string>();
+  /** Bumped whenever the warehouse changes in a way that could unblock a failed recovery. */
+  private worldVersion = 0;
   private events: SimEvent[] = [];
   private movements: MovementRecord[] = [];
   private deliveryTicks: number[] = [];
@@ -184,6 +195,7 @@ export class WarehouseEngine implements SimulationSource {
   constructor(scenario: CompiledScenario, options: EngineOptions = {}) {
     this.scenario = scenario;
     this.checking = options.checkInvariants ?? process.env.NODE_ENV !== "production";
+    this.deadlockOptions = options.deadlock ?? {};
     this.initialise();
     this.verify();
   }
@@ -308,8 +320,8 @@ export class WarehouseEngine implements SimulationSource {
     this.robots = specs.map((spec, rank) => ({
       spec,
       rank,
-      position: spec.home,
-      previousPosition: spec.home,
+      position: spec.start ?? spec.home,
+      previousPosition: spec.start ?? spec.home,
       heading: spec.heading,
       status: "idle",
       action: "none",
@@ -349,6 +361,10 @@ export class WarehouseEngine implements SimulationSource {
       })),
     );
     this.currentTarget = new Map();
+    this.deadlocks = new DeadlockManager(this.deadlockOptions);
+    this.yields = new Map();
+    this.freshYields = new Set();
+    this.worldVersion = 0;
 
     this.emit("scenario-loaded", "info", `Scenario "${definition.name}" loaded`);
     for (const job of definition.missions) this.createMissionInternal(job);
@@ -371,7 +387,8 @@ export class WarehouseEngine implements SimulationSource {
     const modes = new Map<string, CoordMode>();
     for (const robot of this.robots) modes.set(robot.spec.id, this.prepare(robot));
 
-    // Phase 2 — cooperative planning in priority order.
+    // Phase 2 — cooperative planning in priority order (yielders first).
+    const recovering = this.deadlocks.recoveringRobots();
     const intents = this.coordinator.plan(
       planTick,
       this.robots.map((robot) => ({
@@ -382,8 +399,11 @@ export class WarehouseEngine implements SimulationSource {
         priority: this.priorityOf(robot),
         mode: modes.get(robot.spec.id)!,
         goalDwell: this.goalDwell(robot),
+        recoveryFirst: this.freshYields.has(robot.spec.id),
+        noPreempt: recovering.has(robot.spec.id),
       })),
     );
+    this.freshYields.clear();
 
     // Phase 3 — commit-time conflict check for the whole fleet at once.
     const resolution = resolveMoves(intents);
@@ -410,6 +430,8 @@ export class WarehouseEngine implements SimulationSource {
       }
     }
     this.promoteDecisions();
+    // Phase 5 — deadlock detection and recovery decisions for the next tick.
+    this.runDeadlocks();
     for (const robot of this.robots) this.updateBatteryFlag(robot);
     this.invalidate();
   }
@@ -426,6 +448,21 @@ export class WarehouseEngine implements SimulationSource {
       if (robot.dwell === 0) this.completeDwell(robot);
       robot.goal = null;
       return "dwelling";
+    }
+
+    // Deadlock recovery: a yielding robot heads for (or stays at) its holding position.
+    const yieldOrder = this.yields.get(robot.spec.id);
+    if (yieldOrder) {
+      const hold = this.cellPoint(yieldOrder.holdingCell);
+      robot.goal = hold;
+      robot.goalStationId = null;
+      robot.action = "yielding";
+      if (samePoint(robot.position, hold)) {
+        this.setStatus(robot, "waiting");
+        robot.blockedTicks = 0;
+        robot.note = `Yielding (${yieldOrder.incidentId}) at holding position`;
+      }
+      return "mobile";
     }
 
     const target = this.targetFor(robot);
@@ -499,6 +536,124 @@ export class WarehouseEngine implements SimulationSource {
         { robotId: robot.spec.id, missionId: robot.missionId ?? undefined },
       );
     }
+  }
+
+  /** Phase 5: feed the tick's outcome to the deadlock manager and apply its decisions. */
+  private runDeadlocks(): void {
+    const layout = this.scenario.layout;
+    const occupant = new Map(this.robots.map((r) => [this.cellIndex(r.position), r.spec.id]));
+    const holder = new Map(this.coordinator.table.listHolds().map((h) => [h.cell, h.robotId]));
+    const inputs = this.robots.map((robot) => {
+      const id = robot.spec.id;
+      const view = this.coordinator.robotView(id, this.tick);
+      const cell = this.cellIndex(robot.position);
+      const goal = robot.goal ? this.cellIndex(robot.goal) : cell;
+      const mission = robot.missionId ? this.missions.get(robot.missionId) : undefined;
+      const fullRoute = goal === cell ? [] : this.coordinator.staticRoute(goal, cell, 80);
+      const planned: number[] = [];
+      for (const step of view.plan) if (planned.at(-1) !== step.cell && step.cell !== cell) planned.push(step.cell);
+      return {
+        id,
+        rank: robot.rank,
+        cell,
+        goal,
+        mode: (robot.status === "failed" ? "failed" : robot.dwell > 0 ? "dwelling" : "mobile") as "failed" | "dwelling" | "mobile",
+        waiting: robot.status === "waiting" && !this.yields.has(id),
+        waitStreak: robot.status === "waiting" ? robot.blockedTicks : 0,
+        reservationBlocker: view.waitingFor,
+        hasMission: mission !== undefined && isActiveMission(mission.state),
+        missionWeight: mission ? MISSION_WEIGHT[mission.priority] : 0,
+        carrying: robot.packageId !== null,
+        onNarrow: layout.cells[cell] === "narrow",
+        distanceToGoal: goal === cell ? 0 : this.coordinator.distance(goal, cell),
+        routeAhead: fullRoute.slice(0, 8),
+        fullRoute,
+        planComplete: view.planStatus === "complete",
+        plannedRoute: planned,
+      };
+    });
+
+    const update = this.deadlocks.update({
+      tick: this.tick,
+      robots: inputs,
+      occupant,
+      holder,
+      worldVersion: this.worldVersion,
+      findHolding: (robotId, protectedCells) => this.findHolding(robotId, protectedCells, occupant),
+    });
+
+    for (const id of update.release) {
+      if (this.deadlocks.activeYields().has(id)) continue; // still holding for another attempt
+      this.yields.delete(id);
+      this.coordinator.invalidate(id);
+      const robot = this.robotById(id);
+      if (robot) robot.note = "Yield complete; resuming its own goal";
+    }
+    for (const order of update.start) {
+      this.yields.set(order.yielderId, { incidentId: order.incidentId, holdingCell: order.holdingCell });
+      this.freshYields.add(order.yielderId);
+      this.coordinator.prepareRecovery(
+        this.tick,
+        order.yielderId,
+        order.group.map((id) => ({ id, cell: this.cellIndex(this.robotById(id)!.position) })),
+      );
+      const robot = this.robotById(order.yielderId)!;
+      robot.stats.replans += 1;
+      robot.note = `Yielding (${order.incidentId}): moving to a holding position`;
+    }
+    for (const e of update.events) {
+      this.emit(e.kind, e.severity, e.message, {
+        robotId: e.robotId,
+        robotIds: e.robotIds,
+        incidentId: e.incidentId,
+        attempt: e.attempt,
+        cell: e.cell !== undefined ? this.cellPoint(e.cell) : undefined,
+        action: e.action,
+        status: e.status,
+      });
+    }
+  }
+
+  /**
+   * Nearest safe holding position for a yielding robot: BFS (N, E, S, W)
+   * through traversable, non-station, open cells not occupied by another
+   * robot, returning the first cell outside `protectedCells` that nobody else
+   * holds or has reserved. Bounded to 30 steps.
+   */
+  private findHolding(robotId: string, protectedCells: ReadonlySet<number>, occupant: ReadonlyMap<number, string>): { cell: number; route: number[] } | null {
+    const robot = this.robotById(robotId)!;
+    const start = this.cellIndex(robot.position);
+    const { width, height } = this.scenario.layout;
+    const parent = new Map<number, number>([[start, -1]]);
+    const depth = new Map<number, number>([[start, 0]]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const cell = queue.shift()!;
+      if (cell !== start && !protectedCells.has(cell) && this.coordinator.table.canHoldFrom(robotId, this.tick + 1, cell)) {
+        const route: number[] = [];
+        for (let c = cell; c !== start; c = parent.get(c)!) route.push(c);
+        return { cell, route: route.reverse() };
+      }
+      if (depth.get(cell)! >= 30) continue;
+      const x = cell % width;
+      const y = (cell - x) / width;
+      const next = [
+        y > 0 ? cell - width : -1,
+        x < width - 1 ? cell + 1 : -1,
+        y < height - 1 ? cell + width : -1,
+        x > 0 ? cell - 1 : -1,
+      ];
+      for (const n of next) {
+        if (n < 0 || parent.has(n)) continue;
+        if (!this.grid.passable(n, false)) continue;
+        const other = occupant.get(n);
+        if (other !== undefined && other !== robotId) continue;
+        parent.set(n, cell);
+        depth.set(n, depth.get(cell)! + 1);
+        queue.push(n);
+      }
+    }
+    return null;
   }
 
   /** Coordinator decisions that matter to operators become engine events. */
@@ -826,6 +981,7 @@ export class WarehouseEngine implements SimulationSource {
     if (!dropoff) return err("unknown-station", `Unknown drop-off station "${dropoffId}"`);
     if (pickup.kind !== "pickup") return err("invalid-station-kind", `${pickupId} is a ${pickup.kind} station, not a pickup`);
     if (dropoff.kind !== "dropoff") return err("invalid-station-kind", `${dropoffId} is a ${dropoff.kind} station, not a drop-off`);
+    this.worldVersion += 1;
     const mission = this.createMissionInternal({ pickup: pickupId, dropoff: dropoffId, priority });
     return ok({ message: `${mission.id} queued (${pickupId} → ${dropoffId}${priority !== "normal" ? `, ${priority}` : ""})`, entityId: mission.id });
   }
@@ -849,6 +1005,7 @@ export class WarehouseEngine implements SimulationSource {
         this.coordinator.invalidate(robot.spec.id);
       }
     }
+    this.worldVersion += 1;
     this.emit("mission-cancelled", "info", `${missionId} cancelled`, { missionId, robotId: mission.robotId ?? undefined, packageId: mission.packageId });
     return ok({ message: `${missionId} cancelled`, entityId: missionId });
   }
@@ -878,6 +1035,7 @@ export class WarehouseEngine implements SimulationSource {
     };
     this.closures.push(closure);
     for (const key of unique.keys()) this.closedCells.set(key, id);
+    this.worldVersion += 1;
     const affected = this.coordinator.worldChanged((cell) => unique.has(cell), this.tick);
     for (const robotId of affected) this.robotById(robotId)!.stats.replans += 1;
     this.emit(
@@ -897,6 +1055,7 @@ export class WarehouseEngine implements SimulationSource {
     if (!closure) return err("unknown-closure", `Unknown closure "${closureId}"`);
     this.closures = this.closures.filter((c) => c.id !== closureId);
     for (const cell of closure.cells) this.closedCells.delete(this.cellIndex(cell));
+    this.worldVersion += 1;
     this.coordinator.worldChanged(() => false, this.tick);
     this.emit("aisle-reopened", "info", `${closureId} reopened`, { closureId });
     return ok({ message: `${closureId} reopened`, entityId: closureId });
@@ -911,6 +1070,8 @@ export class WarehouseEngine implements SimulationSource {
     robot.action = "halted";
     robot.dwell = 0;
     robot.goal = null;
+    this.yields.delete(robotId);
+    this.worldVersion += 1;
     robot.blockedTicks = 0;
     robot.chargerId = null;
     robot.note = why;
@@ -1076,7 +1237,7 @@ export class WarehouseEngine implements SimulationSource {
     kind: SimEventKind,
     severity: EventSeverity,
     message: string,
-    refs: Pick<SimEvent, "robotId" | "missionId" | "packageId" | "stationId" | "closureId"> = {},
+    refs: Pick<SimEvent, "robotId" | "missionId" | "packageId" | "stationId" | "closureId" | "robotIds" | "incidentId" | "attempt" | "cell" | "action" | "status"> = {},
   ): void {
     this.eventSeq += 1;
     this.events.push({ id: `E-${pad(this.eventSeq)}`, seq: this.eventSeq, tick: this.tick, kind, severity, message, ...refs });
@@ -1112,9 +1273,14 @@ export class WarehouseEngine implements SimulationSource {
         .map((r) => ({ tick: r.tick, robotId: r.robotId, ...this.cellPoint(r.cell) })),
       holds: table.listHolds().map((h) => ({ robotId: h.robotId, fromTick: h.fromTick, ...this.cellPoint(h.cell) })),
       decisions: this.coordinator.recentDecisions().slice(),
-      waitGraph: robots
-        .filter((r) => r.waitingFor !== null && r.status !== "failed")
-        .map((r) => ({ robotId: r.id, waitingFor: r.waitingFor!, ticks: r.blockedTicks })),
+      // Multi-edge wait-for graph from the deadlock detector (see deadlock/wait-for-graph.ts).
+      waitGraph: this.deadlocks.edges().map((e) => ({
+        robotId: e.from,
+        waitingFor: e.to,
+        ticks: robots.find((r) => r.id === e.from)?.blockedTicks ?? 0,
+        cell: e.cell >= 0 ? this.cellPoint(e.cell) : undefined,
+        reason: e.reason,
+      })),
       stats: this.coordinator.getStats(),
       horizon: this.coordinator.horizon,
     };
@@ -1151,6 +1317,8 @@ export class WarehouseEngine implements SimulationSource {
         planStatus: view.planStatus,
         plan,
         waitingFor: view.waitingFor,
+        waitClass: this.deadlocks.classOf(r.spec.id),
+        deadlockId: this.deadlocks.incidentOf(r.spec.id),
         activityNote: r.note,
         stats: { ...r.stats },
       };
@@ -1173,7 +1341,18 @@ export class WarehouseEngine implements SimulationSource {
       movements: this.movements.slice(),
       deliveryTicks: this.deliveryTicks.slice(),
       coordination: this.coordinationSnapshot(robots),
-      metrics: computeMetrics(this.tick, robots, missions, this.deliveryTicks.length, this.closures.length),
+      deadlocks: this.deadlocks.snapshot(
+        (cell) => this.cellPoint(cell),
+        (id) => robots.find((r) => r.id === id)?.blockedTicks ?? 0,
+      ),
+      metrics: computeMetrics(
+        this.tick,
+        robots,
+        missions,
+        this.deliveryTicks.length,
+        this.closures.length,
+        new Set(robots.filter((r) => r.waitClass === "deadlock" || r.waitClass === "recovering" || r.waitClass === "yielding").map((r) => r.deadlockId)).size,
+      ),
     };
   }
 }

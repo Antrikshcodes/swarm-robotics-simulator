@@ -12,12 +12,16 @@ export function computeMetrics(
   missions: readonly Mission[],
   completedDeliveries: number,
   activeClosures = 0,
+  openDeadlocks = 0,
 ): FleetMetrics {
   const robotById = new Map(robots.map((r) => [r.id, r]));
   const failed = robots.filter((r) => r.status === "failed" || r.status === "recovering").length;
   const idle = robots.filter((r) => r.status === "idle" || r.status === "charging").length;
   const waiting = robots.filter((r) => r.status === "waiting").length;
-  const blocked = robots.filter((r) => r.status === "waiting" && r.blockedTicks >= BLOCKED_ALERT_TICKS).length;
+  // Robots in a deadlock incident are counted once per incident, not per robot.
+  const blocked = robots.filter(
+    (r) => r.status === "waiting" && r.blockedTicks >= BLOCKED_ALERT_TICKS && r.deadlockId === null,
+  ).length;
   const lowBattery = robots.filter(
     (r) => r.status !== "failed" && r.status !== "recovering" && r.battery < LOW_BATTERY_THRESHOLD,
   ).length;
@@ -36,8 +40,8 @@ export function computeMetrics(
     completedDeliveries,
     // One incident per failed robot (its stranded mission is part of it),
     // per robot blocked beyond the alert threshold, per low-battery robot,
-    // and per active aisle closure. Mirrors deriveIncidents() in the UI.
-    openIncidents: failed + blocked + lowBattery + activeClosures,
+    // per active aisle closure, and per open deadlock incident. Mirrors deriveIncidents() in the UI.
+    openIncidents: failed + blocked + lowBattery + activeClosures + openDeadlocks,
     utilisation: tick === 0 || robots.length === 0 ? 0 : busy / (tick * robots.length),
   };
 }

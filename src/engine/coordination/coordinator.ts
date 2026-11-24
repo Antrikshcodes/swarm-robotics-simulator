@@ -41,6 +41,10 @@ export interface CoordRobotInput {
   readonly mode: CoordMode;
   /** Ticks the robot will spend at its goal (station handling); undefined = stays indefinitely. */
   readonly goalDwell?: number;
+  /** Deadlock recovery: plan this robot before everyone else this tick. */
+  readonly recoveryFirst?: boolean;
+  /** Deadlock recovery: never preempt, or preempt on behalf of, this robot. */
+  readonly noPreempt?: boolean;
 }
 
 export interface RobotCoordination {
@@ -75,6 +79,8 @@ interface RobotPlanState {
 
 const MAX_DECISIONS = 120;
 const APPROACH_EXPANSIONS = 600;
+/** Ticks before the same robot may take right-of-way from the same blocker again. */
+const PREEMPT_COOLDOWN = 12;
 
 export class Coordinator {
   readonly table: ReservationTable;
@@ -85,6 +91,7 @@ export class Coordinator {
   private worldVersion = 0;
   /** Tick stamped on decisions: the tick being executed (planning tick + 1). */
   private decisionTick = 0;
+  private lastPreempt = new Map<string, number>();
   readonly horizon: number;
   private readonly maxExpansions: number;
   private readonly preemptAfter: number;
@@ -110,6 +117,7 @@ export class Coordinator {
     this.robots.clear();
     this.decisions = [];
     this.decisionSeq = 0;
+    this.lastPreempt = new Map();
     this.stats = { plansComputed: 0, nodesExpanded: 0, preemptions: 0, commitRejections: 0, plannedWaits: 0, lastTickPlans: 0 };
     for (const r of [...robots].sort((a, b) => a.rank - b.rank)) {
       this.table.setHold(r.id, r.cell, 0);
@@ -183,7 +191,9 @@ export class Coordinator {
   plan(tick: number, robots: readonly CoordRobotInput[]): MoveIntent[] {
     this.decisionTick = tick + 1;
     this.table.expireBefore(tick);
-    const inputs = [...robots].sort((a, b) => b.priority - a.priority || a.rank - b.rank);
+    const inputs = [...robots].sort(
+      (a, b) => Number(b.recoveryFirst ?? false) - Number(a.recoveryFirst ?? false) || b.priority - a.priority || a.rank - b.rank,
+    );
     let plans = 0;
 
     for (const r of inputs) {
@@ -294,6 +304,49 @@ export class Coordinator {
   }
 
   /**
+   * Deadlock recovery: free the group's future reservations so the yielder
+   * can be planned first (next tick) to its holding position. The other
+   * members keep only their current cells until they replan after it.
+   */
+  prepareRecovery(tick: number, yielderId: string, group: readonly { id: string; cell: number }[]): void {
+    for (const member of group) {
+      this.table.release(member.id, tick + 1);
+      this.invalidate(member.id);
+    }
+    for (const member of group) {
+      if (member.id === yielderId) continue;
+      this.claimCell(member.id, member.cell, tick);
+    }
+    this.decisionTick = tick;
+    this.decide(tick, "replan", yielderId, `${yielderId} replans first to make way (deadlock recovery)`);
+  }
+
+  /**
+   * Cells along the static shortest route from `from` to `goal` (excluding
+   * `from`), following the distance gradient with N, E, S, W tie-breaking.
+   */
+  staticRoute(goal: number, from: number, maxCells: number): number[] {
+    const dist = this.distances.get(this.grid, goal, this.worldVersion);
+    const route: number[] = [];
+    let current = from;
+    let here = distanceFrom(this.grid, dist, current);
+    while (here > 0 && route.length < maxCells) {
+      let next = -1;
+      for (const n of neighbourCells(current, this.grid.width, this.grid.height)) {
+        if (dist[n] === here - 1 && this.grid.passable(n, n === goal)) {
+          next = n;
+          break;
+        }
+      }
+      if (next < 0) break;
+      route.push(next);
+      current = next;
+      here -= 1;
+    }
+    return route;
+  }
+
+  /**
    * A robot that will physically stay on `cell` must own it from the next
    * tick on. Any other robot that planned to use the cell loses its plan,
    * stands still this tick and replans — the occupied cell wins.
@@ -329,13 +382,15 @@ export class Coordinator {
     const byId = new Map(inputs.map((r) => [r.id, r]));
     for (const r of inputs) {
       const s = this.robots.get(r.id)!;
-      if (r.mode !== "mobile" || r.cell === r.goal || touched.has(r.id)) continue;
+      if (r.mode !== "mobile" || r.cell === r.goal || touched.has(r.id) || r.noPreempt) continue;
       if (s.waitStreak < this.preemptAfter) continue;
       if (this.positionAt(s, tick + 1) !== r.cell) continue; // already moving
       const blockerId = this.blockerFor(r, tick);
       if (!blockerId || touched.has(blockerId)) continue;
       const blocker = byId.get(blockerId);
-      if (!blocker || blocker.mode !== "mobile") continue;
+      if (!blocker || blocker.mode !== "mobile" || blocker.noPreempt) continue;
+      const pairKey = `${r.id}>${blockerId}`;
+      if (tick - (this.lastPreempt.get(pairKey) ?? -Infinity) < PREEMPT_COOLDOWN) continue;
       if (!(blocker.priority < r.priority || (blocker.priority === r.priority && blocker.rank > r.rank))) continue;
       // The blocker physically stays put next tick; skip if that cell is promised to someone else.
       if (!this.table.canOccupy(blockerId, tick + 1, blocker.cell)) continue;
@@ -351,6 +406,7 @@ export class Coordinator {
       touched.add(r.id);
       touched.add(blockerId);
       this.stats.preemptions += 1;
+      this.lastPreempt.set(pairKey, tick);
       this.decide(
         tick,
         "preempt",

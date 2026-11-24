@@ -71,6 +71,7 @@ export type RobotAction =
   | "travel-to-dropoff"
   | "return-home"
   | "travel-to-charger"
+  | "yielding"
   | "loading"
   | "unloading"
   | "charging"
@@ -137,6 +138,9 @@ export interface RobotState {
   readonly plan: readonly PlannedStep[];
   /** Robot that holds the reservation this robot is waiting on, if any. */
   readonly waitingFor: string | null;
+  readonly waitClass: WaitClass;
+  /** Deadlock incident this robot belongs to, if any is open. */
+  readonly deadlockId: string | null;
   /** Human-readable explanation of the current activity. */
   readonly activityNote: string | null;
   readonly stats: RobotStats;
@@ -235,7 +239,15 @@ export type SimEventKind =
   | "robot-returning-home"
   | "battery-low"
   | "aisle-closed"
-  | "aisle-reopened";
+  | "aisle-reopened"
+  // Deadlock lifecycle (names follow the Mission 004 event contract).
+  | "deadlock_detected"
+  | "deadlock_group_identified"
+  | "deadlock_recovery_started"
+  | "robot_yielded"
+  | "recovery_route_planned"
+  | "deadlock_resolved"
+  | "deadlock_recovery_failed";
 
 export interface SimEvent {
   /** Stable identifier, e.g. "E-000042" (engine) or "P-000003" (playback). */
@@ -251,6 +263,16 @@ export interface SimEvent {
   readonly packageId?: string;
   readonly stationId?: string;
   readonly closureId?: string;
+  /** All robots involved (deadlock events). */
+  readonly robotIds?: readonly string[];
+  readonly incidentId?: string;
+  readonly attempt?: number;
+  /** Contested or target cell (blocking resource, holding position). */
+  readonly cell?: GridPoint;
+  /** Recovery action taken, e.g. "yield-to-holding-position". */
+  readonly action?: string;
+  /** Resolution status at the time of the event. */
+  readonly status?: DeadlockStatus;
 }
 
 /** Per-tick movement record, kept in a separate bounded log. */
@@ -322,7 +344,77 @@ export interface HoldReservation {
 export interface WaitForEdge {
   readonly robotId: string;
   readonly waitingFor: string;
+  /** Consecutive ticks `robotId` has been waiting. */
   readonly ticks: number;
+  /** Contested cell, if known. */
+  readonly cell?: GridPoint;
+  /** occupied = stands on a route cell; held = end-of-plan claim; reserved = reservation the robot waits on. */
+  readonly reason?: "occupied" | "held" | "reserved";
+}
+
+// ---------------------------------------------------------------- deadlock
+
+/**
+ * How a robot's waiting is classified this tick:
+ * none · waiting (brief) · congestion (≥ 3 ticks, no cycle) · deadlock
+ * (confirmed circular wait or stall) · recovering (in a group being
+ * recovered) · yielding (the robot chosen to make way).
+ */
+export type WaitClass = "none" | "waiting" | "congestion" | "deadlock" | "recovering" | "yielding";
+
+export type DeadlockKind = "cycle" | "stall";
+export type DeadlockStatus = "detected" | "recovering" | "resolved" | "failed";
+export type RecoveryOutcome = "in-progress" | "resolved" | "escalated" | "no-holding-position" | "no-route" | "timeout" | "aborted";
+
+export interface RecoveryAttempt {
+  readonly attempt: number;
+  readonly yielderId: string;
+  readonly holdingCell: GridPoint | null;
+  /** Route the yielder planned to its holding position (empty until planned). */
+  readonly route: readonly GridPoint[];
+  readonly startedTick: number;
+  readonly endedTick: number | null;
+  readonly outcome: RecoveryOutcome;
+  readonly note: string;
+}
+
+export interface DeadlockIncident {
+  readonly id: string;
+  readonly kind: DeadlockKind;
+  readonly status: DeadlockStatus;
+  /** Robots in the circular wait (or the stalled chain). */
+  readonly robots: readonly string[];
+  /** Robots waiting on the group without being part of the cycle. */
+  readonly dependents: readonly string[];
+  /** Wait-for edges among the group when it was confirmed. */
+  readonly edges: readonly WaitForEdge[];
+  /** Cells the group members were contesting. */
+  readonly blockingCells: readonly GridPoint[];
+  readonly detectedTick: number;
+  readonly resolvedTick: number | null;
+  readonly attempts: readonly RecoveryAttempt[];
+  readonly failureReason: string | null;
+}
+
+export interface DeadlockSnapshot {
+  /** Latest incidents, newest last, bounded. */
+  readonly incidents: readonly DeadlockIncident[];
+  readonly stats: {
+    readonly detected: number;
+    readonly resolved: number;
+    readonly failed: number;
+    readonly attempts: number;
+    /** Cycles seen but cleared before confirmation (not reported as deadlocks). */
+    readonly transientCycles: number;
+  };
+  readonly thresholds: {
+    readonly confirmTicks: number;
+    readonly congestionTicks: number;
+    readonly stallTicks: number;
+    readonly maxAttempts: number;
+    readonly attemptTimeout: number;
+  };
+  readonly recoveryEnabled: boolean;
 }
 
 export interface CoordinationSnapshot {
@@ -354,6 +446,7 @@ export interface SimulationSnapshot {
   /** Tick of every completed delivery (for throughput analytics). */
   readonly deliveryTicks: readonly number[];
   readonly coordination: CoordinationSnapshot;
+  readonly deadlocks: DeadlockSnapshot;
   readonly metrics: FleetMetrics;
 }
 

@@ -61,7 +61,7 @@ describe("coordination in the engine", () => {
       expect(new Set(keys).size).toBe(keys.length);
     });
     expect(snap.coordination.stats.commitRejections).toBe(0);
-    expect(snap.metrics.completedDeliveries).toBeGreaterThan(50);
+    if (SCENARIOS.find((s) => s.id === id)?.group !== "lab") expect(snap.metrics.completedDeliveries).toBeGreaterThan(50);
   });
 
   it("robots move concurrently, not one at a time", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SimulationSnapshot } from "../types/simulation";
 import { checkInvariants } from "./invariants";
-import { createSimulationSource, getCompiledScenario, SCENARIOS } from "./index";
+import { createSimulationSource, getCompiledScenario, getScenario, SCENARIOS } from "./index";
 import { compileScenario, type ScenarioDefinition } from "./scenario";
 import { WarehouseEngine } from "./warehouse-engine";
 
@@ -41,7 +41,7 @@ describe("scenario compatibility", () => {
       expect(checkInvariants(snap)).toEqual([]);
     }
     expect(snap.tick).toBe(1500);
-    expect(snap.metrics.completedDeliveries).toBeGreaterThan(0);
+    if (getScenario(id).group !== "lab") expect(snap.metrics.completedDeliveries).toBeGreaterThan(0);
   });
 
   it("rejects invalid scenario definitions with precise errors", () => {
@@ -328,7 +328,8 @@ describe("narrow aisle", () => {
 });
 
 describe("liveness in shipped scenarios (bounded-wait replanning, not a general guarantee)", () => {
-  it.each(SCENARIOS.map((s) => s.id))("%s keeps delivering and never blocks a working robot for long", (id) => {
+  // Deadlock-lab scenarios are deliberately stuck or delivery-free; covered in deadlock.engine.test.ts.
+  it.each(SCENARIOS.filter((s) => s.group !== "lab").map((s) => s.id))("%s keeps delivering and never blocks a working robot for long", (id) => {
     const e = engine(id);
     let maxBlocked = 0;
     let lastDelivered = 0;

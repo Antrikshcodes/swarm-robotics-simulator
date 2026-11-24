@@ -1,4 +1,5 @@
 import { compileScenario, type CompiledScenario, type ScenarioDefinition } from "../scenario";
+import { DEADLOCK_LAB } from "./deadlock-lab";
 import { highDensityScenario } from "./high-density";
 import { narrowAisleScenario } from "./narrow-aisle";
 import { standardScenario } from "./standard";
@@ -7,6 +8,7 @@ export const SCENARIOS: readonly ScenarioDefinition[] = [
   standardScenario,
   narrowAisleScenario,
   highDensityScenario,
+  ...DEADLOCK_LAB,
 ];
 
 export type ScenarioId = (typeof SCENARIOS)[number]["id"];
