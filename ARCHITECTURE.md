@@ -54,7 +54,7 @@ src/
 
 Adapt to the generated scaffold if it has a better idiomatic structure; preserve the separation of concerns.
 
-### Current implementation (Mission 004)
+### Current implementation (Mission 005)
 
 ```text
 src/engine/
@@ -71,6 +71,9 @@ src/engine/
   deadlock/
     wait-for-graph.ts         wait-for edges (occupied/held/reserved), Tarjan SCC cycles   ← "Deadlock manager"
     deadlock-manager.ts       confirmation, classification, bounded recovery attempts    ← "Recovery manager" (deadlocks)
+  recovery/
+    recovery-manager.ts       failure records, package-recovery tasks, rescuer selection,
+                              timeouts, attempt budget                                   ← "Recovery manager" (failures)
   custody/package-custody.ts  custody state machine
   missions/mission-lifecycle.ts mission state machine (with priority)                  ← part of "Mission scheduler"
   robots/robot-lifecycle.ts   robot status transitions
@@ -78,7 +81,7 @@ src/engine/
   warehouse-engine.ts         world state, tick loop, assignment, commands, events, snapshots
 ```
 
-**Tick (T → T+1):** scheduled commands → seeded feed → assignment (most urgent first, nearest robot by cached distance) → *prepare* (station handling, goals, arrivals) → *coordinate* (`Coordinator.plan`) → *commit* (`resolveMoves`) → *apply* (moves, arrivals, waits, promote decisions to events) → *deadlocks* (`DeadlockManager.update`) → logged commands (replay) → invariants.
+**Tick (T → T+1):** scheduled commands → seeded feed → *recovery* (`RecoveryManager.update`: rescuer dispatch, timeouts) → assignment (most urgent first, nearest robot by cached distance) → *prepare* (station handling, goals, arrivals) → *coordinate* (`Coordinator.plan`) → *commit* (`resolveMoves`) → *apply* (moves, arrivals, waits, promote decisions to events) → *deadlocks* (`DeadlockManager.update`) → logged commands (replay) → invariants.
 
 **Reservation model.** A reservation at tick t means "after tick t". Cells and directed edges are reserved per tick and owned by a robot id; every plan ends with a *hold* (indefinite claim of its last cell) unless the plan ends at a station, in which case only the handling window (+1 tick to leave) is reserved. A robot always owns the cell it physically occupies until it plans to leave (`claimCell`); dwelling and failed robots claim their cells and revoke conflicting claims. Reservations before the current tick expire every tick.
 
@@ -87,6 +90,8 @@ src/engine/
 **Preemption.** A robot that has waited ≥ 3 ticks behind a lower-priority, mobile robot takes right-of-way: the blocker is pinned for one tick, its other reservations are released, the higher robot replans first, then the blocker replans around it. Dwelling and failed robots are never preempted.
 
 **Deadlock detection and recovery (Mission 004).** After moves are applied, the engine passes each robot's wait state, static route (gradient walk over the cached distance map, `Coordinator.staticRoute`), occupancy and holds to `DeadlockManager.update`. The manager builds the wait-for graph, confirms persistent cycles (4 ticks), classifies congestion and stalls, and drives bounded recovery. It never moves robots itself: it returns *yield orders* (holding cell per yielder) and *releases*. The engine applies them by overriding the yielder's goal, calling `Coordinator.prepareRecovery` (release the group's reservations, invalidate plans, claim current cells) and setting `recoveryFirst` so the yielder plans first next tick. Holding positions come from an engine-side BFS (`findHolding`) that respects closures, stations, occupancy and `ReservationTable.canHoldFrom`. Robots in any cycle or open incident get `noPreempt`, so right-of-way and deadlock recovery never act on the same robots. A `worldVersion` counter (bumped by world commands) lets failed incidents retry only after the world changes. Full rules: SIMULATION_RULES.md › Deadlock handling.
+
+**Failure recovery (Mission 005).** `fail_robot` halts the robot (`Coordinator.fail`: release reservations, hold the cell, invalidate crossing routes) and records a `RobotFailure`. Before pickup the mission is requeued; with a package on board the package becomes `recovery-required` (custody stays with the failed robot) and `RecoveryManager.openTask` opens `RC-nn`. Each tick, before assignment, `RecoveryManager.update(port)` asks the engine (through a `RecoveryPort`: eligible robots, nearest free handover cell and its static distance, reachability, holder-on-dock) and returns dispatches and releases. A dispatch only gives the rescuer a goal (`rescue` target) and a movement priority; it then plans like any robot, so reservations, commit checks and deadlock recovery apply unchanged. On arrival the rescuer dwells for the handover and `completeHandover` performs the atomic custody transfer, mission reassignment and robot bookkeeping in one step. `restore_robot` runs a type-specific restoration (`recovering`), then `Coordinator.restore` returns the robot to planning. Closures and reopenings report `route_invalidated` per robot immediately and `robot_route_replanned` after the next plan (`pendingReplan`).
 
 - `WarehouseEngine` implements `SimulationSource` (`step`, `reset`, `seek`, `getSnapshot`, `dispatch`). It is the single owner of world state; the UI only reads snapshots and sends commands.
 - Wall-clock pacing lives in `components/layout/playback-driver.tsx`; the engine never owns timers.
@@ -110,7 +115,7 @@ Owns time-indexed cell and directed-edge reservations. It must reject conflictin
 Detects waiting cycles and blocked dependencies, distinguishes temporary congestion from deadlock, and invokes a bounded recovery strategy. **Implemented** in `engine/deadlock/` (Mission 004).
 
 ### Recovery manager
-Deadlock recovery (yield to a safe holding position, cascade, bounded attempts, safe failure) is implemented in `deadlock-manager.ts`. Robot-failure recovery — robot unavailability and task reassignment — is still planned. Package custody must be updated atomically and retain an audit history.
+Deadlock recovery (yield to a safe holding position, cascade, bounded attempts, safe failure) is implemented in `deadlock-manager.ts`. Robot-failure recovery is implemented in `recovery/recovery-manager.ts` (Mission 005): it owns failure records and package-recovery tasks and decides who recovers what; the engine executes those decisions through the existing coordinator and custody functions. Package custody must be updated atomically and retain an audit history.
 
 ### Simulation loop
 Advances discrete ticks, invokes scheduling/coordination, validates invariants, and emits events/snapshots. It must be deterministic for a fixed seed, scenario, and command sequence.

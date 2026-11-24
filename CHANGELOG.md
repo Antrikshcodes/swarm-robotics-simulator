@@ -2,6 +2,25 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-24 — Mission 005: robot failure recovery and dynamic aisle replanning (`feat/mission-001-frontend`)
+
+### Added
+- Failure model: `motor`, `battery`, `navigation`, `communication`, `emergency-stop` failures with records (`F-nn`), `restore_robot` with type-specific restoration (`failed → recovering → idle`).
+- Package custody `recovery-required` state with `package.recovery`, `assignRescuer`, atomic `transferCustody` and `resumeCustody`.
+- `src/engine/recovery/recovery-manager.ts`: package-recovery tasks (`RC-nn`), deterministic rescuer selection, handover cell, timeouts, bounded attempts, rescuer failure handling, safe failure and world-change retry.
+- Commands `restore_robot`, `start_package_recovery`, `complete_package_handover`, `cancel_recovery`; `fail_robot` takes `failureType`.
+- Events `robot_failed`, `robot_recovery_started`, `robot_recovery_completed`, `robot_restored`, `package_recovery_required`, `package_recovery_started`, `package_custody_transferred`, `package_delivery_resumed`, `aisle_closed`, `aisle_reopened`, `route_invalidated`, `robot_route_replanned`, `recovery_failed`; `SimEvent` gains `reason`, `failureType`, `taskId`.
+- Snapshot `recovery` block; robot `failure`, `recoveryRole`, `routeEvent`.
+- Recovery lab scenarios A–F; invariants for failed robots and stranded packages.
+- Studio: failure-type menu, restore, failure & recovery inspector section, aisle-run closure, restoring/restored/rescuer halos, stranded-package marker, rescuer link and handover cell, route badges; failure incident detail on the Incidents page.
+- 51 new tests (192 total).
+
+### Changed
+- `fail-robot`, `close-aisle`, `reopen-aisle` renamed to `fail_robot`, `close_aisle`, `reopen_aisle`; events `robot-failed`, `mission-recovery-required`, `robot-replanned`, `aisle-closed`, `aisle-reopened` replaced by the snake_case kinds above.
+- A robot failing before pickup no longer strands its mission: the mission is requeued and reassigned.
+- `recovery-required` missions are no longer terminal; they resume as `carrying` after a handover or restoration.
+- Reopening an aisle replans robots that gain a route or a shorter one.
+
 ## 2026-11-24 — Mission 004: deadlock detection and recovery (`feat/mission-001-frontend`)
 
 ### Added

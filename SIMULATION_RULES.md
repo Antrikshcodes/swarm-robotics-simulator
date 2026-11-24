@@ -16,9 +16,10 @@ Status legend: **Enforced** = implemented and checked by `checkInvariants()` aft
 1. `tick += 1`
 2. Scenario-scheduled world commands for this tick
 3. Seeded mission feed (may queue one mission; skips stations blocked by a failed robot)
+3a. Failure recovery: rescuer dispatch and timeouts for stranded packages (before assignment, so free robots recover packages first)
 4. Assignment: queued missions, most urgent first then oldest, each to the available robot with the shortest static distance to its pickup; ties go to the lower robot ID
-5. Prepare: station handling, goals and arrivals — no movement
-6. Coordinate: prioritised space-time planning over the reservation table
+5. Prepare: station handling, handovers, restoration countdown, goals and arrivals — no movement
+6. Coordinate: prioritised space-time planning over the reservation table (robots whose route a world change invalidated report `robot_route_replanned`)
 7. Commit: the whole fleet's intended moves are checked together
 8. Apply moves, arrivals and waits
 9. Deadlock phase: wait-for graph, cycle confirmation, recovery attempts (goal and planning-order changes only, applied from the next tick)
@@ -63,17 +64,19 @@ Implemented states and transitions (`missions/mission-lifecycle.ts`). Every chan
 queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed
    │         │           │
    └─────────┴───────────┴──→ cancelled            (only before pickup)
-assigned … dropping-off ──→ recovery-required      (robot failed)
-assigned / to-pickup ──→ queued                    (requeue: a station on its route is blocked by a failed robot)
+assigned / to-pickup / picking-up ──→ queued      (robot failed before pickup, or a station on its route is blocked by a failed robot)
+carrying / to-dropoff / dropping-off ──→ recovery-required   (robot failed with the package on board)
+recovery-required ──→ carrying                      (rescuer took custody, or the failed robot was restored)
 ```
 
 Missions carry a priority (`normal`, `high`, `urgent`) that orders assignment and drives movement priority.
 
 - `assigned`: a robot is reserved for the mission but has not moved yet (or has no route).
 - `carrying`: the package is on the robot but it has no drop-off route yet (e.g. a closure blocks every route).
-- `completed`, `cancelled` and `recovery-required` are terminal. A completed mission is never reassigned.
+- `completed` and `cancelled` are terminal. A completed mission is never reassigned.
+- `recovery-required` is not terminal: it returns to `carrying` (with the rescuer as its robot, or the restored original robot), so the delivery resumes exactly once. — **Implemented (Mission 005)**.
 - A mission is completed **only** when its package is delivered at the mission's drop-off station. — **Enforced**.
-- Automatic recovery of `recovery-required` missions. — **Planned (Mission 004)**.
+- A robot failure never deletes or cancels a mission. — **Enforced by tests**.
 
 ## Package custody
 
@@ -81,11 +84,14 @@ A package has exactly one authoritative custody state (`custody/package-custody.
 
 ```
 available ⇄ reserved → picked-up → in-transit → delivered
+                            │            ▲   │
+                            └──▶ recovery-required ──▶ in-transit   (handover to the assigned rescuer, or holder restored)
 ```
 
 - `reserved`: owned by exactly one robot for one mission. Released back to `available` only by that robot (mission cancelled before pickup).
 - `picked-up`: loaded at its origin station by the holder.
 - `in-transit`: the holder has moved away with it.
+- `recovery-required`: the holder failed with the package on board. The failed robot stays the holder (the package is physically on it); `package.recovery` records the failed robot, the recovery task and the single robot allowed to take it over. Nobody can reserve, pick up or deliver it.
 - `delivered`: terminal; only at the destination station.
 
 Rules:
@@ -94,22 +100,67 @@ Rules:
 - A package cannot be picked up twice. — **Enforced**.
 - Delivery is terminal; a delivered package cannot be delivered again. — **Enforced**.
 - Only the holding robot may pick up, carry or deliver the package, and only at the correct station. — **Enforced**.
-- A robot failure while carrying must trigger an explicit recovery/custody transition. — **Partially implemented**: on failure, custody is retained by the failed robot, an audit note is appended, and the mission becomes `recovery-required`. The explicit transfer to another robot is **Planned (Mission 004)**.
+- A robot failure while carrying must trigger an explicit recovery/custody transition. — **Enforced (Mission 005)**: `markRecoveryRequired` → `assignRescuer` (audit only) → `transferCustody` (atomic: state, holder, location and history change in one record, only to the assigned rescuer, only once) or `resumeCustody` (holder restored).
+- A failed robot before pickup releases its reservation (`reserved → available`); the mission is requeued and reassigned. — **Implemented**.
+- A rescuer never holds custody before the handover; if it fails or times out, custody is unchanged. — **Enforced** (invariant: a rescuer carries nothing).
 - Completed delivery history must never be erased by robot failure or replanning. — **Implemented** (append-only history; pruning only removes the oldest finished missions beyond 200 together with their packages).
 - Custody transitions are atomic and auditable. — **Implemented** (pure functions, each returning a new package with a history record or an explicit error).
 
-## Dynamic aisle closures
+## Dynamic aisle closures — **Implemented (Mission 005)**
 
-- A closure changes traversability from the tick it is applied. — **Implemented** (`close-aisle` command; closure IDs `CL-nn`).
-- Affected routes are invalidated safely. — **Implemented**: robots whose remaining path crosses a closed cell replan on their next update and emit `robot-replanned`.
-- Robots already on a newly closed cell are not teleported; they may leave it. — **Implemented**.
+- A closure changes traversability from the tick it is applied (`close_aisle`, one or more cells; closure IDs `CL-nn`). The Studio closes a single cell or the straight aisle run through it (up to 8 cells).
+- Affected routes are invalidated safely: every robot whose reserved plan crosses a closed cell gets `route_invalidated` (with the cell and cause), its future reservations are released immediately, and it replans on the next tick, reported by `robot_route_replanned` (or a safe hold with "no route" when none exists).
+- Robot positions, mission assignments and custody are never changed by a closure; there is no reset.
+- A robot standing on a newly closed cell is not teleported or removed: it keeps its cell (and its hold), may leave it, and no robot may enter it afterwards (the planner treats closed cells as impassable). — **Enforced by tests**.
 - Stations, racks and obstacles cannot be closed (explicit error).
-- Replanning occurs without resetting simulation time or losing completed missions. — **Implemented**.
-- Reopening (`reopen-aisle`) restores the cells; robots without a route retry every tick.
+- Reopening (`reopen_aisle`) restores traversability, invalidates distance caches and replans every robot that gains a route or a shorter one (`robot_route_replanned`).
 
-## Robot status
+## Robot status and failure lifecycle — **Implemented (Mission 005)**
 
-`idle, moving, carrying, waiting, loading, unloading, charging, failed, recovering`. Transitions are validated (`robots/robot-lifecycle.ts`): a failed robot can only become `recovering`, and `recovering` only `idle` or `failed`. No command yet moves a robot out of `failed` — **Planned (Mission 004)**.
+`idle, moving, carrying, waiting, loading, unloading, charging, failed, recovering`. Transitions are validated (`robots/robot-lifecycle.ts`):
+
+```
+any operational status ──fail_robot──▶ failed ──restore_robot──▶ recovering (restoring) ──▶ idle
+                                         ▲                             │
+                                         └──────── fail_robot ─────────┘
+```
+
+- Failure types: `motor`, `battery`, `navigation`, `communication`, `emergency-stop`. Each failure is recorded (`RobotFailure`: id `F-nn`, robot, type, reason, tick, position, mission and package at the time, status `active` → `restoring` → `restored`).
+- A failed or restoring robot never moves, is never assigned a mission or a rescue, and holds its cell; robots plan around it. — **Enforced** (invariants: no movement while failed/recovering; no active mission on a failed robot).
+- Restoration takes a type-specific number of ticks (motor 12, battery 8, navigation 6, communication 4, emergency stop 2); a battery failure ends with a fresh battery. The robot then rejoins the fleet (`robot_restored`) and, if it still holds its package, resumes the delivery itself.
+- A failed robot stays unavailable until explicitly restored.
+
+## Failure recovery — **Implemented (Mission 005)**
+
+Code: `src/engine/recovery/recovery-manager.ts` (decisions) and `warehouse-engine.ts` (execution). There is no second movement or reservation mechanism: rescuers are ordinary robots with a goal, planned by the same coordinator.
+
+1. **On failure** (`fail_robot`): the robot halts; its reservations are released and its cell held; robots routed through it get `route_invalidated`.
+   - Before pickup (`assigned`, `to-pickup`, `picking-up`): the package reservation is released, the mission requeued (`robot_recovery_started`, action `requeue-mission`) and reassigned to the next available robot (`robot_recovery_completed`, action `mission-reassigned`).
+   - With the package on board: the package becomes `recovery-required`, the mission `recovery-required`, and a recovery task `RC-nn` opens (`package_recovery_required`, `robot_recovery_started`).
+   - If the robot was a rescuer: its attempt ends (`rescuer-failed`); custody was never transferred, and another robot is selected.
+2. **Candidate selection** (each tick, before assignment): eligible robots are operational, without mission, package or rescue job, with ≥ 15 % battery and not yielding in a deadlock. The one with the shortest static distance to a free cell beside the failed robot is chosen; ties go to the lower robot ID. Free = traversable, non-station, open, not occupied or held by another robot. `package_recovery_started` names the rescuer, handover cell and attempt.
+3. **Approach**: the rescuer's goal is the handover cell; it plans through the normal reservation table with movement priority = stranded mission urgency + 3. Deadlock recovery may make it yield like any robot.
+4. **Handover**: beside the failed robot the rescuer dwells `handoverTicks` (2), then `transferCustody` moves the package atomically; mission → `carrying` with the rescuer; the failed robot no longer holds anything (`package_custody_transferred`, `package_delivery_resumed`, `robot_recovery_completed`). `complete_package_handover` can complete it immediately once the rescuer is beside the failed robot.
+5. **Timeouts and bounds**: a rescuer that has not reached the handover within `timeoutTicks` (120) is released (`recovery_failed`, status `pending`) and excluded; after `maxAttempts` (3) attempts, when every available robot has timed out, or when no operational robot can reach a cell beside the failed robot, the task fails (`recovery_failed`, status `failed`): custody stays with the failed robot and the task retries with a fresh budget only after the warehouse changes. A holder that stopped on its own destination dock cannot be recovered by another robot (it must be restored to unload).
+6. **Operator control**: `start_package_recovery` (restart, optionally choosing the rescuer), `cancel_recovery` (only before custody changes; the package stays with the failed robot and is not auto-restarted), `restore_robot` (stands any rescuer down; the holder resumes).
+
+### Recovery lab scenarios
+
+| ID | Demonstrates |
+|---|---|
+| `rec-a-no-package` | R-01 fails travelling to its pick face; the mission is requeued and reassigned, delivered once. |
+| `rec-b-carrying` | R-01 fails carrying; R-02 takes custody beside it and delivers once. |
+| `rec-c-aisle-closure` | Two aisles close under two robots' routes; both replan; four deliveries; the rerouted traffic causes a deadlock that Mission 004 recovery resolves. |
+| `rec-d-occupied-closure` | The cell under parked R-02 closes; it stays, later leaves, and nobody enters until reopening. |
+| `rec-e-reopen` | A dock is cut off mid-delivery (safe hold, no route); reopening restores the route and the delivery. |
+| `rec-f-rescuer-failure` | The rescuer fails before the handover; another robot is selected; custody never touches the failed rescuer. |
+
+### Limits
+
+- One rescuer per stranded package; no towing or physical removal of the failed robot, which keeps blocking its cell until restored.
+- A robot that failed on its destination dock must be restored to finish unloading.
+- A closure that cuts a handover cell off is handled by the rescue timeout rather than immediate re-selection.
+- Failures are injected by command or schedule; there is no stochastic failure model.
 
 ## Battery (simplified model)
 

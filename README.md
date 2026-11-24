@@ -6,12 +6,12 @@ SWARM is an autonomous multi-robot warehouse coordination and simulation platfor
 
 ## Project status
 
-**Phase:** Mission 004 — deadlock detection and recovery (in review)
+**Phase:** Mission 005 — robot failure recovery and dynamic aisle replanning (in review)
 **Problem statement:** NexHack 2.0 — PS 05
 **Repository:** [Antrikshcodes/swarm-robotics-simulator](https://github.com/Antrikshcodes/swarm-robotics-simulator)
-**Working branch:** `feat/mission-001-frontend` (Missions 001–004; not merged to `main`)
+**Working branch:** `feat/mission-001-frontend` (Missions 001–005; not merged to `main`)
 
-The Simulation Studio is driven by a **deterministic, command-driven engine** with **reservation-based multi-robot coordination**: robots plan cooperatively in space and time over a shared table of cell and edge reservations, wait or detour instead of colliding, and resolve competition by mission priority. **Deadlocks** (circular waits, narrow-aisle standoffs, stalled robots) are detected on a wait-for graph, told apart from ordinary congestion, and recovered autonomously by a bounded, deterministic yield-to-holding-position strategy. Automatic *robot-failure* recovery (repair, custody transfer) is not implemented yet.
+The Simulation Studio is driven by a **deterministic, command-driven engine** with **reservation-based multi-robot coordination**: robots plan cooperatively in space and time over a shared table of cell and edge reservations, wait or detour instead of colliding, and resolve competition by mission priority. **Deadlocks** (circular waits, narrow-aisle standoffs, stalled robots) are detected on a wait-for graph, told apart from ordinary congestion, and recovered autonomously by a bounded, deterministic yield-to-holding-position strategy. **Robot failures** are recovered without losing work: missions not yet picked up are reassigned, packages stranded on a failed robot are taken over by the nearest free robot through an atomic custody handover, and failed robots can be restored. **Aisles** can be closed and reopened at runtime; affected routes are invalidated and replanned without a reset.
 
 ## What works today
 
@@ -19,16 +19,18 @@ The Simulation Studio is driven by a **deterministic, command-driven engine** wi
 |---|---|
 | Shell | Persistent sidebar (collapsible, persisted), top bar with breadcrumb, scenario selector, playback status, alerts menu, operator menu |
 | Overview `/` | Fleet and mission KPIs, live warehouse preview, active alerts, fleet activity, recent events |
-| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, closures, robots, reserved cells, planned stops, wait-for arrows, priority flags, rulers, **deadlock halos, blocking cells, recovery routes and holding positions**); coordination chip and panel with deadlock status; scenario picker grouped into Operations and Deadlock lab; select/pan, zoom, fit, reset, overlay toggles; inspector for robots (task, route, custody trail, **mark failed**), stations (**queue mission**) and cells (**close / reopen**); play/pause/step/reset, 0.5–4× speed, seekable timeline, event strip; keyboard shortcuts |
+| Simulation Studio `/simulation` | Canvas warehouse (racks, lanes, narrow passages, obstacles, stations, closures, robots, reserved cells, planned stops, wait-for arrows, priority flags, rulers, **deadlock halos, blocking cells, recovery routes and holding positions**); coordination chip and panel with deadlock status; scenario picker grouped into Operations and Deadlock lab; select/pan, zoom, fit, reset, overlay toggles; inspector for robots (task, route, custody trail, **fail with a failure type**, **restore**, failure & recovery status), stations (**queue mission**) and cells (**close cell or aisle run / reopen**); failure, restoring, restored and rescuer states, stranded packages, rescue links and handover cells, route invalidated/replanned badges; play/pause/step/reset, 0.5–4× speed, seekable timeline, event strip; keyboard shortcuts |
 | Fleet `/fleet` | Status-filtered robot roster, inspect-in-studio |
 | Missions `/missions` | Lifecycle KPIs, **new-mission form**, state-filtered log with custody column and **cancel** |
-| Incidents `/incidents` | Derived incident queue (deadlocks, failed robots, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure; **deadlock detail** with lifecycle, wait-for group, recovery decisions and event sequence |
+| Incidents `/incidents` | Derived incident queue (deadlocks, robot failures, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure, restore robot; **deadlock detail** and **failure detail** (lifecycle, failure record, recovery decisions, custody trail, event sequence) |
 | Analytics `/analytics` | Throughput (chart + table), cycle time, utilisation, per-robot time allocation |
 | Settings `/settings` | Tick duration, motion smoothing, canvas overlays, compact sidebar, shortcut reference |
 
 Three scenarios ship: **Standard warehouse** (5 robots, seeded feed with high/urgent missions), **Narrow aisle** (opposing missions compete for a one-cell passage; robots reserve it in turn or take a bypass), and **High-density warehouse** (8 robots, heavy feed, R-07 failed on a dock at tick 40 — its station's missions are held and requeued).
 
 Five **Deadlock lab** scenarios demonstrate Mission 004: **A** two-robot head-on deadlock, **B** three-robot circular wait (cascading recovery), **C** narrow-aisle standoff against a convoy, **D** temporary congestion (must *not* be reported as deadlock), **E** unrecoverable deadlock (safe failure).
+
+Six **Recovery lab** scenarios demonstrate Mission 005: **A** failure without a package (mission reassigned), **B** failure while carrying (rescuer handover, delivered once), **C** aisle closure under moving robots (replanning), **D** closure of a cell occupied by a robot, **E** aisle reopening, **F** failure of the recovery robot itself.
 
 ### What the engine does
 
@@ -38,7 +40,9 @@ Five **Deadlock lab** scenarios demonstrate Mission 004: **A** two-robot head-on
 - **Lifecycles:** validated mission states (`queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed`, plus `cancelled`, `recovery-required`) and package custody (`available → reserved → picked-up → in-transit → delivered`) with append-only history.
 - **Safety:** no two robots in a cell and no head-on swaps — prevented when planning and re-checked at commit (0 commit-time rejections in every shipped scenario and benchmark). `checkInvariants()` runs after every tick and command outside production builds.
 - **Deadlocks:** a wait-for graph (occupied / held / reserved cells on each waiting robot's route) is built every tick; strongly connected components are circular waits. A cycle is confirmed only after it persists 4 ticks with every member waiting, so congestion is never misreported. Recovery ranks the group deterministically (passage priority, convoy size, urgency, cargo, wait time, ID), sends the yielder to the nearest safe holding position off everyone else's route through the normal reservation table, cascades if a residual cycle remains, and is bounded (3 attempts, timeouts). If no safe option exists the robots hold in place and `deadlock_recovery_failed` is emitted. Recovery never teleports, resets, deletes missions or touches custody.
-- **Commands:** start, pause, step, reset, load scenario, select robot, add / cancel mission, close / reopen aisle, mark robot failed — each returns an explicit success or error, shown as a toast.
+- **Failure recovery:** five failure types; a failed robot halts, holds its cell and is never assigned. Before pickup its mission is requeued; with a package on board the package becomes `recovery-required` (custody stays with the failed robot) and a recovery task picks the nearest free robot, which drives beside it through the normal reservation table and takes custody in one atomic handover. Timeouts, bounded attempts, rescuer failures and safe failure are handled; `restore_robot` brings a robot back after a type-specific delay.
+- **Dynamic topology:** closing cells or aisle runs invalidates crossing routes (`route_invalidated`), releases their reservations and replans them (`robot_route_replanned`); robots on a closed cell stay put and nobody may enter; reopening restores normal planning.
+- **Commands:** start, pause, step, reset, load scenario, select robot, add / cancel mission, `close_aisle` / `reopen_aisle`, `fail_robot` / `restore_robot`, `start_package_recovery`, `complete_package_handover`, `cancel_recovery` — each returns an explicit success or error, shown as a toast.
 - **Determinism:** same scenario + same command sequence ⇒ identical snapshots. The timeline seeks by replaying the command log.
 
 Every number in the UI is derived from engine state and carries an `ENGINE` badge. See [SIMULATION_RULES.md](SIMULATION_RULES.md) for exactly what is enforced versus planned.
@@ -99,13 +103,14 @@ src/
     warehouse-engine.ts  WarehouseEngine: tick loop, scheduler, movement, commands, events, snapshots
     coordination/      reservation table, space-time A*, distance maps, coordinator, commit resolver
     deadlock/          wait-for graph (Tarjan SCC) and deadlock manager (detection, recovery)
+    recovery/          failure records and package-recovery manager
     pathfinding/       spatial A* + min-heap
     custody/           package custody state machine
     missions/ robots/  lifecycle state machines
     world/layout.ts    ASCII warehouse parser and grid helpers
     core/              Result types, seeded PRNG
     commands.ts invariants.ts metrics.ts scenario.ts
-    scenarios/         standard, narrow-aisle, high-density, deadlock-lab (A–E)
+    scenarios/         standard, narrow-aisle, high-density, deadlock-lab (A–E), recovery-lab (A–F)
   lib/
     render/            Canvas theme + pure warehouse renderer
     selectors.ts       derived incidents and analytics
@@ -128,7 +133,7 @@ src/
 ## Known limitations
 
 - **Deadlock recovery is heuristic, not complete.** It resolves circular waits by having one robot (or a cascade of robots) yield to a safe holding position; it does not do joint multi-robot planning. Geometries with no safe holding position (Lab E) are detected and reported as unresolved rather than solved. Stalls behind a failed robot cannot be cleared until robot recovery exists.
-- **No automatic failure recovery.** A failed robot keeps its package, its mission becomes `recovery-required`, and it permanently blocks its cell; there is no repair or custody-transfer command yet.
+- **Failure recovery is single-rescuer and operator-restored.** A failed robot is never towed: it blocks its cell until `restore_robot`. A robot that failed on its own destination dock must be restored to finish unloading. Failures are injected by command or schedule (no stochastic failure model).
 - Assignment is greedy nearest-robot by priority; no deadlines, batching or global optimisation.
 - Planning horizon is 48 ticks; longer routes are planned in windows.
 - Battery is a simplified model.

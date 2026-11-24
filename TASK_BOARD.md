@@ -118,6 +118,32 @@ Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review*
 - `npm run bench` — 0 commit rejections at 4–32 robots; 0.15–1.20 ms/tick mean with the deadlock phase
 - Browser (1440×900): Lab C recovery in progress (yielding halo, holding cell, recovery route, blocking cells, inspector card, chip); Lab B resolved incidents with lifecycle, decisions and event sequence; Lab E unresolved deadlock; no console errors after a clean reload
 
+## Current milestone: Mission 005 — Robot failure recovery and dynamic aisle replanning
+
+Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review** pending independent review.
+
+| ID | Task | Status | Owner |
+|---|---|---|---|
+| M5-01 | Verify Mission 004 baseline (pushed, 141 tests, clean-clone build) | Done | Claude Code |
+| M5-02 | Failure model, robot lifecycle, failure records and restoration | Review | Claude Code |
+| M5-03 | Custody: `recovery-required`, assigned rescuer, atomic transfer, resume; mission lifecycle changes + tests | Review | Claude Code |
+| M5-04 | RecoveryManager: selection, timeouts, bounded attempts, rescuer failure, safe failure, operator commands + tests | Review | Claude Code |
+| M5-05 | Engine integration: recovery phase, rescue target, handover, restore, invariants | Review | Claude Code |
+| M5-06 | Dynamic aisle closure/reopening: route invalidation, reservation release, replanning events, occupied cells | Review | Claude Code |
+| M5-07 | Recovery lab scenarios A–F and engine tests | Review | Claude Code |
+| M5-08 | Studio: failure-type menu, restore, recovery section, aisle-run closure, canvas visuals, failure incident detail | Review | Claude Code |
+| M5-09 | Lint, typecheck, tests, build, browser verification | Done | Claude Code |
+| M5-10 | Independent review of Mission 005 | Todo | Codex |
+
+### M5-09 verification record
+
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` — passes (strict)
+- `npm test` — 192/192 passing across 14 files (recovery manager 9, recovery engine 25, custody 11, mission lifecycle 8, plus earlier suites), including every failure type, all six recovery lab scenarios with per-tick collision, swap, failed-robot-movement, closed-cell-entry, single-holder and delivered-once checks, determinism through seek, and a 3 000-tick high-density run with 20 injected failures and restorations
+- `npm run build` — all routes prerendered
+- `npm run bench` — 0 commit rejections at 4–32 robots; 0.15–1.18 ms/tick mean
+- Browser (1440×900): Recovery B failure, stranded-package marker, rescuer link and handover cell, inspector failure & recovery section and custody trail, handover and delivery; failure-type menu (battery) and Restore (8 ticks, battery 100 %); failure incident detail with lifecycle, recovery decisions, custody trail and event sequence; aisle-run closure from the cell inspector with no-route hold; no console errors
+
 ## Next milestones
 
 Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md).

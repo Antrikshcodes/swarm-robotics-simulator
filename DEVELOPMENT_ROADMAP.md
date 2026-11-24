@@ -67,12 +67,26 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 - [x] Tests: graph, cycles, thresholds, false positives, selection, holding, release/replan, bounds, failure, custody, collisions, swaps, determinism, long runs.
 - [ ] Independent review (Codex) and resolution of findings.
 
-Not in Mission 004 (moved to a later mission): recover-robot command (`failed → recovering → idle`), custody transfer and reassignment of `recovery-required` missions, releasing a failed robot's permanent hold.
+Not in Mission 004 (delivered in Mission 005): recover-robot command (`failed → recovering → idle`), custody transfer and reassignment of `recovery-required` missions, releasing a failed robot's permanent hold.
 
-## Mission 005 — Metrics, polish, and judging scenarios
+## Mission 005 — Robot failure recovery and dynamic aisle replanning
+
+Status: implementation complete on `feat/mission-001-frontend`, awaiting independent review.
+
+- [x] Failure model: five failure types, failure records (robot, type, tick, position, mission, package, status), `failed → recovering → idle` with type-specific restoration.
+- [x] Failed robots never move or get assignments; missions before pickup are requeued and reassigned.
+- [x] Package custody: `recovery-required` state, single assigned rescuer, atomic custody transfer, resume by a restored holder, audit trail; delivered exactly once.
+- [x] Recovery manager: deterministic rescuer selection, handover cell, reservations through the existing coordinator, timeouts, bounded attempts, rescuer failure, safe failure and world-change retry, operator start / cancel / complete handover.
+- [x] Dynamic aisle closure: cell or aisle-run closure, route invalidation, reservation release, replanning, occupied-cell safety, reopening with replanning.
+- [x] Commands `fail_robot`, `restore_robot`, `close_aisle`, `reopen_aisle`, `start_package_recovery`, `complete_package_handover`, `cancel_recovery`; thirteen snake_case events.
+- [x] Studio, inspector and Incidents integration; recovery lab scenarios A–F.
+- [x] Tests: every failure type, movement/assignment prevention, mission and custody preservation, atomic transfer, duplicate-custody prevention, selection, timeout, rescuer failure, closure, reopening, occupied cell, invalidation, reservation release, replanning, deadlock integration, determinism, 3 000-tick stress run.
+- [ ] Independent review (Codex) and resolution of findings.
+
+## Mission 006 — Metrics, polish, and judging scenarios (not started)
 
 - [x] Completed jobs, waiting time and utilisation from engine state/events *(Missions 002–003)*; [ ] congestion measure (cell-occupancy heat, blocked-wait per aisle).
-- [ ] Scenario controls for all required demonstrations (narrow passage, failure while carrying, dynamic blockage, concurrent deliveries) with one-click setup.
+- [ ] Scenario controls for all required demonstrations with one-click setup *(lab scenarios for deadlocks and failure recovery exist since Missions 004–005)*.
 - [x] Event log and coordination decision trace *(Missions 002–003)*; [ ] explainable per-robot timeline.
 - [ ] End-to-end UI tests and larger-map performance checks.
 - [ ] Concise demo flow and technical explanation.
