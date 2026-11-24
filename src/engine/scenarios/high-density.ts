@@ -52,7 +52,7 @@ export const highDensityScenario: ScenarioDefinition = {
     { pickup: "PK-03", dropoff: "DO-03" },
     { pickup: "PK-04", dropoff: "DO-04" },
   ],
-  feed: { intervalTicks: 5, maxOpen: 8, routes: ALL_ROUTES },
+  feed: { intervalTicks: 5, maxOpen: 8, routes: ALL_ROUTES, priorityMix: { high: 0.2, urgent: 0.1 } },
   schedule: [{ tick: 40, command: { type: "fail-robot", robotId: "R-07", reason: "Drive motor over-current (injected)" } }],
   handling: { loadTicks: 3, unloadTicks: 3 },
 };

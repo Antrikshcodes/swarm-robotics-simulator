@@ -10,6 +10,8 @@ const TOGGLES: Record<string, BooleanPreference> = {
   c: "showCoordinates",
   p: "showRoutes",
   l: "showLabels",
+  y: "showReservations",
+  w: "showWaitLinks",
 };
 
 function isTypingTarget(target: EventTarget | null): boolean {

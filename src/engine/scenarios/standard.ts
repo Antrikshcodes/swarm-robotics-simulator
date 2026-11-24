@@ -33,7 +33,7 @@ export const standardScenario: ScenarioDefinition = {
   name: "Standard warehouse",
   summary: "Baseline layout · 5 robots · A*-routed deliveries",
   focus:
-    "Missions are queued by a seeded feed and assigned to the nearest available robot. Routes are planned with A*; robots wait for occupied cells and replan around persistent blockers.",
+    "A seeded feed queues normal, high and urgent missions; the most urgent go first to the nearest free robot. Robots plan cooperatively in space and time over a shared reservation table, waiting or detouring instead of colliding.",
   seed: 1001,
   map: MAP,
   robots: [
@@ -48,6 +48,6 @@ export const standardScenario: ScenarioDefinition = {
     { pickup: "PK-02", dropoff: "DO-02" },
     { pickup: "PK-03", dropoff: "DO-03" },
   ],
-  feed: { intervalTicks: 10, maxOpen: 5, routes: ALL_ROUTES },
+  feed: { intervalTicks: 10, maxOpen: 5, routes: ALL_ROUTES, priorityMix: { high: 0.2, urgent: 0.08 } },
   handling: { loadTicks: 3, unloadTicks: 3 },
 };

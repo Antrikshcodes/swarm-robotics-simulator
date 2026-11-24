@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSimulationStore } from "@/store/simulation-store";
 import { cn } from "@/lib/utils";
+import type { MissionPriority } from "@/types/simulation";
+
+const PRIORITY_LABEL: Record<MissionPriority, string> = { normal: "Normal", high: "High", urgent: "Urgent" };
 
 /**
  * Queues a pickup → drop-off mission via the engine's add-mission command.
@@ -26,6 +29,8 @@ export function NewMissionForm({
   const dropoffs = stations.filter((s) => s.kind === "dropoff");
   const [pickup, setPickup] = useState<string>(defaultPickup ?? pickups[0]?.id ?? "");
   const [dropoff, setDropoff] = useState<string>(dropoffs[0]?.id ?? "");
+  const [priority, setPriority] = useState<MissionPriority>("normal");
+  const priorityId = useId();
   const pickupId = useId();
   const dropoffId = useId();
 
@@ -38,7 +43,7 @@ export function NewMissionForm({
       className={cn("flex flex-wrap items-end gap-2", className)}
       onSubmit={(event) => {
         event.preventDefault();
-        dispatch({ type: "add-mission", pickupStationId: pickupValue, dropoffStationId: dropoffValue });
+        dispatch({ type: "add-mission", pickupStationId: pickupValue, dropoffStationId: dropoffValue, priority });
       }}
     >
       <div className="flex flex-col gap-1">
@@ -75,6 +80,33 @@ export function NewMissionForm({
             {dropoffs.map((s) => (
               <SelectItem key={s.id} value={s.id} className="font-mono text-xs">
                 {s.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
+        {!compact ? (
+          <label htmlFor={priorityId} className="label-caps">
+            Priority
+          </label>
+        ) : null}
+        <Select value={priority} onValueChange={(v) => setPriority(v as MissionPriority)}>
+          <SelectTrigger
+            id={priorityId}
+            size="sm"
+            aria-label="Mission priority"
+            className={cn(
+              "w-24 border-line text-xs",
+              priority === "urgent" ? "text-danger" : priority === "high" ? "text-amber" : undefined,
+            )}
+          >
+            <SelectValue>{PRIORITY_LABEL[priority]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {(["normal", "high", "urgent"] as const).map((p) => (
+              <SelectItem key={p} value={p} className="text-xs">
+                {PRIORITY_LABEL[p]}
               </SelectItem>
             ))}
           </SelectContent>

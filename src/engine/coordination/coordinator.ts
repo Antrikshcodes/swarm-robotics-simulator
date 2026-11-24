@@ -39,6 +39,8 @@ export interface CoordRobotInput {
   readonly goal: number;
   readonly priority: number;
   readonly mode: CoordMode;
+  /** Ticks the robot will spend at its goal (station handling); undefined = stays indefinitely. */
+  readonly goalDwell?: number;
 }
 
 export interface RobotCoordination {
@@ -189,7 +191,8 @@ export class Coordinator {
       s.priority = r.priority;
       if (r.mode === "failed") continue;
       if (r.mode === "dwelling") {
-        if (s.positions.length > 1 || this.table.holdAt(r.cell)?.robotId !== r.id) this.holdInPlace(r, tick);
+        // Its plan normally reserved the dwell window already; otherwise claim the cell.
+        if (this.table.cellOwner(tick + 1, r.cell) !== r.id) this.holdInPlace(r, tick);
         s.state = "dwelling";
         continue;
       }
@@ -250,6 +253,7 @@ export class Coordinator {
       table: this.table,
       horizon: this.horizon,
       maxExpansions: approach ? Math.min(this.maxExpansions, APPROACH_EXPANSIONS) : this.maxExpansions,
+      goalDwell: r.goalDwell,
     });
     this.stats.plansComputed += 1;
     this.stats.nodesExpanded += result.expanded;
@@ -258,8 +262,15 @@ export class Coordinator {
     s.status = result.status;
     s.needsPlan = false;
     if (result.status === "complete" || result.status === "partial") {
-      this.table.reservePlan(r.id, tick, result.positions);
-      s.positions = [...result.positions];
+      let positions = [...result.positions];
+      let hold = true;
+      if (result.status === "complete" && r.goalDwell !== undefined) {
+        // Reserve exactly the station-handling window, then hold only if nobody needs the dock later.
+        positions = positions.concat(Array.from({ length: r.goalDwell }, () => r.goal));
+        hold = this.table.canHoldFrom(r.id, tick + positions.length - 1, r.goal);
+      }
+      this.table.reservePlan(r.id, tick, positions, { hold });
+      s.positions = positions;
       s.startTick = tick;
       return;
     }

@@ -105,6 +105,7 @@ export function MissionBoard() {
           <THead>
             <Tr>
               <Th>Mission</Th>
+              <Th>Priority</Th>
               <Th>Package</Th>
               <Th>Robot</Th>
               <Th>Pickup → drop-off</Th>
@@ -120,7 +121,7 @@ export function MissionBoard() {
           <tbody>
             {missions.length === 0 ? (
               <Tr>
-                <Td colSpan={11} className="h-24 text-center text-text-secondary">
+                <Td colSpan={12} className="h-24 text-center text-text-secondary">
                   No missions in this state at {formatTick(snapshot.tick)}.
                 </Td>
               </Tr>
@@ -131,6 +132,13 @@ export function MissionBoard() {
                 return (
                   <Tr key={m.id} className="hover:bg-white/[0.02]">
                     <Td className="font-mono font-medium">{m.id}</Td>
+                    <Td>
+                      {m.priority === "normal" ? (
+                        <span className="text-xs text-text-dim">Normal</span>
+                      ) : (
+                        <StatusBadge tone={m.priority === "urgent" ? "red" : "amber"}>{m.priority === "urgent" ? "Urgent" : "High"}</StatusBadge>
+                      )}
+                    </Td>
                     <Td className="font-mono text-text-secondary">{m.packageId}</Td>
                     <Td>
                       {m.robotId ? (
@@ -191,11 +199,11 @@ export function MissionBoard() {
         </Table>
       </Panel>
 
-      <PlannedNote mission="Missions 003–006">
-        Implemented: queued → assigned → to-pickup → picking-up → carrying → to-dropoff → dropping-off → completed,
-        cancellation before pickup, and recovery-required on robot failure. Missing: priorities and deadlines, batching,
-        smarter assignment than nearest-robot, and automatic recovery of recovery-required missions. The log keeps the
-        latest 200 finished missions; hover a custody cell for the package&apos;s full custody trail.
+      <PlannedNote mission="Missions 004–006">
+        Implemented: the full lifecycle, cancellation before pickup, requeue when a station is blocked by a failed robot,
+        and priorities — urgent and high missions are assigned first and their robots get movement priority. Missing:
+        deadlines, batching, assignment smarter than nearest robot, and automatic recovery of recovery-required
+        missions. The log keeps the latest 200 finished missions; hover a custody cell for the full custody trail.
       </PlannedNote>
     </PageContainer>
   );

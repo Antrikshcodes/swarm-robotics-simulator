@@ -21,7 +21,7 @@ export const narrowAisleScenario: ScenarioDefinition = {
   name: "Narrow aisle",
   summary: "Head-on traffic · 4 robots · one-cell passage NA-1",
   focus:
-    "Opposing missions both prefer passage NA-1. Without reservations (Mission 004) robots meet head-on, wait, and the lower-ranked robot replans via a bypass after a bounded wait.",
+    "Opposing missions both want passage NA-1. The first robot to plan reserves it; robots coming the other way wait at the mouth or take a bypass, whichever arrives sooner — never meeting head-on inside.",
   seed: 2002,
   map: MAP,
   robots: [
@@ -41,6 +41,7 @@ export const narrowAisleScenario: ScenarioDefinition = {
       { pickup: "PK-02", dropoff: "DO-02" },
       { pickup: "PK-01", dropoff: "DO-01" },
     ],
+    priorityMix: { high: 0.25, urgent: 0.1 },
   },
   handling: { loadTicks: 3, unloadTicks: 3 },
 };

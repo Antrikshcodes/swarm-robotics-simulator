@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  CalendarClock,
   Grid3x3,
+  Link2,
   Hand,
   Maximize,
   MousePointer2,
@@ -17,6 +19,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { usePreferences } from "@/store/preferences-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { ScenarioSelect } from "./scenario-select";
+import { CoordinationChip } from "./coordination-chip";
 
 const ZOOM_STEP = 1.25;
 
@@ -32,6 +35,8 @@ export function CanvasToolbar() {
   const showRoutes = usePreferences((s) => s.showRoutes);
   const showLabels = usePreferences((s) => s.showLabels);
   const showCoordinates = usePreferences((s) => s.showCoordinates);
+  const showReservations = usePreferences((s) => s.showReservations);
+  const showWaitLinks = usePreferences((s) => s.showWaitLinks);
   const toggle = usePreferences((s) => s.toggle);
 
   return (
@@ -86,6 +91,13 @@ export function CanvasToolbar() {
       <IconButton label="Robot labels" shortcut="L" active={showLabels} onClick={() => toggle("showLabels")}>
         <Tag />
       </IconButton>
+      <IconButton label="Reservations" shortcut="Y" active={showReservations} onClick={() => toggle("showReservations")}>
+        <CalendarClock />
+      </IconButton>
+      <IconButton label="Wait-for links" shortcut="W" active={showWaitLinks} onClick={() => toggle("showWaitLinks")}>
+        <Link2 />
+      </IconButton>
+      <CoordinationChip />
     </div>
   );
 }

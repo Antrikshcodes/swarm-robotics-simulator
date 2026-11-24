@@ -6,7 +6,7 @@ import type { RenderView } from "@/lib/render/warehouse-renderer";
 import { cn } from "@/lib/utils";
 import { useWarehouseRenderer } from "./use-warehouse-renderer";
 
-const PREVIEW_OVERRIDES = { showCoordinates: false, showLabels: false, showGrid: true } as const;
+const PREVIEW_OVERRIDES = { showCoordinates: false, showLabels: false, showGrid: true, showReservations: false } as const;
 
 /** Read-only, auto-fitted render of the live snapshot. */
 export function WarehousePreview({ className, label }: { className?: string; label: string }) {

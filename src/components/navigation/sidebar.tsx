@@ -151,6 +151,7 @@ function NavLink({
 function SystemStatus({ labelClass }: { labelClass: string }) {
   const status = useSimulationStore((s) => s.status);
   const tick = useSimulationStore((s) => s.snapshot.tick);
+  const reserved = useSimulationStore((s) => s.snapshot.coordination.reservations.filter((r) => r.tick > s.snapshot.tick).length);
 
   return (
     <div className="border-t border-line px-2.5 py-3">
@@ -164,10 +165,10 @@ function SystemStatus({ labelClass }: { labelClass: string }) {
           labelClass={labelClass}
         />
         <StatusRow
-          tone="neutral"
+          tone="lime"
           label="Reservations"
-          value="Planned"
-          title="Time-indexed reservations, deadlock handling and recovery arrive in Missions 004–006"
+          value={String(reserved)}
+          title="Time-indexed cell and edge reservations held by the coordinator right now. Deadlock and failure recovery arrive in Mission 004."
           labelClass={labelClass}
         />
         <StatusRow

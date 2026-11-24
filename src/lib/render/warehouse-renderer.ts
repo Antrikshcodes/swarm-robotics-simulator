@@ -31,6 +31,10 @@ export interface RenderOptions {
   readonly showCoordinates: boolean;
   readonly showRoutes: boolean;
   readonly showLabels: boolean;
+  /** Time-indexed reservations and future holds from the coordinator. */
+  readonly showReservations: boolean;
+  /** Dashed links from each waiting robot to the robot it waits for. */
+  readonly showWaitLinks: boolean;
   readonly selection: EntitySelection | null;
   readonly hover: GridPoint | null;
   readonly progress: number;
@@ -151,11 +155,15 @@ export function drawWarehouse(
     if (point) drawBrackets(ctx, theme.lime, ox + point.x * cell, oy + point.y * cell, cell);
   }
 
+  const selectedRobot = sel?.kind === "robot" ? sel.id : null;
+  if (options.showReservations) drawReservations(ctx, theme, view, snapshot, selectedRobot);
+
   if (options.showRoutes) {
     for (const robot of snapshot.robots) {
       drawRoute(ctx, theme, view, robot, options, sel?.kind === "robot" && sel.id === robot.id);
     }
   }
+  if (options.showReservations && selectedRobot) drawReservationTicks(ctx, theme, view, snapshot, selectedRobot);
 
   // Hover outline
   if (options.hover) {
@@ -172,9 +180,14 @@ export function drawWarehouse(
     (a, b) =>
       Number(sel?.kind === "robot" && sel.id === a.id) - Number(sel?.kind === "robot" && sel.id === b.id),
   );
+  const missionPriority = new Map(snapshot.missions.map((m) => [m.id, m.priority]));
   for (const robot of ordered) {
     drawRobot(ctx, theme, view, robot, options, sel?.kind === "robot" && sel.id === robot.id);
+    const priority = robot.missionId ? missionPriority.get(robot.missionId) : undefined;
+    if (priority === "urgent" || priority === "high") drawPriorityFlag(ctx, theme, view, robot, options.progress, priority);
   }
+  // On top of robots so labels never hide who is waiting for whom.
+  if (options.showWaitLinks) drawWaitLinks(ctx, theme, view, snapshot, options.progress);
 
   if (options.showCoordinates) drawRulers(ctx, theme, view, layout.width, layout.height);
 }
@@ -383,6 +396,167 @@ function drawRoute(
   ctx.lineWidth = selected ? 1.5 : 1;
   ctx.beginPath();
   ctx.arc(ex, ey, Math.max(3, cell * 0.26), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------- coordination
+
+/** Reserved future cells (fading with time) and future holds. */
+function drawReservations(
+  ctx: CanvasRenderingContext2D,
+  theme: CanvasTheme,
+  view: RenderView,
+  snapshot: SimulationSnapshot,
+  selectedRobot: string | null,
+) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  const colour = new Map(snapshot.robots.map((r) => [r.id, robotColor(theme, r.colorIndex)]));
+  const position = new Map(snapshot.robots.map((r) => [r.id, r.position]));
+  const window = Math.max(1, snapshot.coordination.horizon);
+  ctx.save();
+  for (const r of snapshot.coordination.reservations) {
+    const dt = r.tick - snapshot.tick;
+    if (dt < 1) continue;
+    const here = position.get(r.robotId);
+    if (here && here.x === r.x && here.y === r.y) continue; // waiting in place: the robot itself shows it
+    const selected = r.robotId === selectedRobot;
+    if (selectedRobot && !selected) {
+      ctx.globalAlpha = 0.35;
+    } else ctx.globalAlpha = 1;
+    const strength = Math.max(0.08, (selected ? 0.55 : 0.32) * (1 - (dt - 1) / window));
+    const inset = cell * (selected ? 0.22 : 0.3);
+    ctx.fillStyle = withAlpha(colour.get(r.robotId) ?? theme.cyan, strength);
+    ctx.fillRect(ox + r.x * cell + inset, oy + r.y * cell + inset, cell - inset * 2, cell - inset * 2);
+  }
+  ctx.globalAlpha = 1;
+  // Future holds (where a robot will stop), not the cell it already stands on.
+  for (const h of snapshot.coordination.holds) {
+    const here = position.get(h.robotId);
+    if (here && here.x === h.x && here.y === h.y) continue;
+    const x = ox + h.x * cell;
+    const y = oy + h.y * cell;
+    ctx.strokeStyle = withAlpha(colour.get(h.robotId) ?? theme.cyan, selectedRobot && h.robotId !== selectedRobot ? 0.3 : 0.85);
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([Math.max(2, cell * 0.12), Math.max(2, cell * 0.1)]);
+    ctx.strokeRect(x + cell * 0.12 + 0.5, y + cell * 0.12 + 0.5, cell * 0.76 - 1, cell * 0.76 - 1);
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+
+/** Tick offsets (+1, +2, …) in the corner of the selected robot's reserved cells. */
+function drawReservationTicks(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: RenderView, snapshot: SimulationSnapshot, robotId: string) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  if (cell < 26) return;
+  const seen = new Set<string>();
+  ctx.save();
+  ctx.font = `600 ${Math.round(Math.min(10, cell * 0.24))}px ${theme.monoFont}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  for (const r of snapshot.coordination.reservations) {
+    const dt = r.tick - snapshot.tick;
+    if (r.robotId !== robotId || dt < 1 || dt > 16) continue;
+    const key = `${r.x},${r.y}`;
+    if (seen.has(key)) continue; // show the first tick a cell is reserved
+    seen.add(key);
+    const x = ox + r.x * cell + 2;
+    const y = oy + r.y * cell + 1.5;
+    const label = `+${dt}`;
+    const w = ctx.measureText(label).width;
+    ctx.fillStyle = withAlpha(theme.bg, 0.8);
+    ctx.fillRect(x - 1, y - 0.5, w + 2, cell * 0.24 + 2);
+    ctx.fillStyle = withAlpha(theme.text, 0.85);
+    ctx.fillText(label, x, y);
+  }
+  ctx.restore();
+}
+
+/** Wait-for graph: waiting robot → robot holding the reservation it needs. */
+function drawWaitLinks(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: RenderView, snapshot: SimulationSnapshot, progress: number) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  const robots = new Map(snapshot.robots.map((r) => [r.id, r]));
+  ctx.save();
+  ctx.strokeStyle = withAlpha(theme.amber, 0.8);
+  ctx.fillStyle = withAlpha(theme.amber, 0.9);
+  ctx.lineWidth = Math.max(1, cell * 0.05);
+  for (const edge of snapshot.coordination.waitGraph) {
+    const a = robots.get(edge.robotId);
+    const b = robots.get(edge.waitingFor);
+    if (!a || !b) continue;
+    const pa = interpolated(a, progress);
+    const pb = interpolated(b, progress);
+    const ax = ox + (pa.x + 0.5) * cell;
+    const ay = oy + (pa.y + 0.5) * cell;
+    const bx = ox + (pb.x + 0.5) * cell;
+    const by = oy + (pb.y + 0.5) * cell;
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len < 1) continue;
+    const ux = (bx - ax) / len;
+    const uy = (by - ay) / len;
+    if (len <= cell * 1.05) {
+      // Adjacent robots: just an arrowhead in the gap between their bodies.
+      const head = Math.max(4, cell * 0.2);
+      // Offset sideways so the arrow sits beside the robot ID label.
+      const side = cell * 0.36;
+      const mx = (ax + bx) / 2 + ux * head * 0.5 - uy * side;
+      const my = (ay + by) / 2 + uy * head * 0.5 + ux * side;
+      ctx.beginPath();
+      ctx.moveTo(mx, my);
+      ctx.lineTo(mx - ux * head - uy * head * 0.7, my - uy * head + ux * head * 0.7);
+      ctx.lineTo(mx - ux * head + uy * head * 0.7, my - uy * head - ux * head * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      continue;
+    }
+    const pad = cell * 0.45;
+    const sx = ax + ux * pad;
+    const sy = ay + uy * pad;
+    const ex = bx - ux * pad;
+    const ey = by - uy * pad;
+    ctx.setLineDash([Math.max(2, cell * 0.12), Math.max(2, cell * 0.1)]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const head = Math.max(3, cell * 0.16);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - ux * head - uy * head * 0.6, ey - uy * head + ux * head * 0.6);
+    ctx.lineTo(ex - ux * head + uy * head * 0.6, ey - uy * head - ux * head * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Small diamond on robots working high / urgent missions. */
+function drawPriorityFlag(
+  ctx: CanvasRenderingContext2D,
+  theme: CanvasTheme,
+  view: RenderView,
+  robot: RobotState,
+  progress: number,
+  priority: "high" | "urgent",
+) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  const p = interpolated(robot, progress);
+  const size = Math.max(8, cell * 0.72);
+  const cx = ox + (p.x + 0.5) * cell - size / 2;
+  const cy = oy + (p.y + 0.5) * cell - size / 2;
+  const r = Math.max(2.5, size * 0.16);
+  ctx.save();
+  ctx.fillStyle = priority === "urgent" ? theme.red : theme.amber;
+  ctx.strokeStyle = theme.bg;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx + r, cy);
+  ctx.lineTo(cx, cy + r);
+  ctx.lineTo(cx - r, cy);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
   ctx.restore();
 }

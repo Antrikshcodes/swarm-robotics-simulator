@@ -23,11 +23,11 @@ export function DataSourceBadge({ className, label = "Engine" }: { className?: s
       </TooltipTrigger>
       <TooltipContent className="max-w-72 flex-col items-start gap-1">
         <span>
-          Live values from the deterministic in-browser engine: A* routing, mission scheduling, package custody and
-          per-tick safety invariants.
+          Live values from the deterministic in-browser engine: space-time reservations and cooperative A*, mission
+          scheduling with priorities, package custody and per-tick safety invariants.
         </span>
         <span className="text-text-secondary">
-          Not yet: time-indexed reservations, deadlock detection, failure recovery, backend.
+          Not yet: deadlock detection and recovery, robot failure recovery, backend.
         </span>
       </TooltipContent>
     </Tooltip>

@@ -75,12 +75,14 @@ export function FleetRoster() {
             />
           }
         />
-        <Table className="min-w-[1080px]">
+        <Table className="min-w-[1240px]">
           <THead>
             <Tr>
               <Th>Robot</Th>
               <Th>Model</Th>
               <Th>Status</Th>
+              <Th className="text-right">Priority</Th>
+              <Th>Waiting for</Th>
               <Th>Cell</Th>
               <Th>Heading</Th>
               <Th>Mission</Th>
@@ -95,7 +97,7 @@ export function FleetRoster() {
           <tbody>
             {robots.length === 0 ? (
               <Tr>
-                <Td colSpan={12} className="h-24 text-center text-text-secondary">
+                <Td colSpan={14} className="h-24 text-center text-text-secondary">
                   No robots match this filter at {formatTick(snapshot.tick)}.
                 </Td>
               </Tr>
@@ -117,6 +119,8 @@ export function FleetRoster() {
                     <Td>
                       <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
                     </Td>
+                    <Td className="tabular text-right font-mono">{robot.priority}</Td>
+                    <Td className="font-mono text-amber">{robot.waitingFor ?? <span className="text-text-dim">—</span>}</Td>
                     <Td className="tabular font-mono">
                       {cellRef(robot.position)} <span className="text-text-dim">({robot.position.x},{robot.position.y})</span>
                     </Td>

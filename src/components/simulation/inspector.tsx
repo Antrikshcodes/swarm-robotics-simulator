@@ -25,7 +25,7 @@ import { BatteryMeter } from "@/components/fleet/battery-meter";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
-import { MISSION_STATE, PACKAGE_STATE, ROBOT_ACTION, ROBOT_STATUS, STATION_KIND } from "@/lib/status";
+import { MISSION_STATE, PACKAGE_STATE, ROBOT_ACTION, ROBOT_STATUS, STATION_KIND, type Tone } from "@/lib/status";
 import { findRobot, findStation, robotUtilisation } from "@/lib/selectors";
 import { cn } from "@/lib/utils";
 
@@ -203,11 +203,9 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
           <Row label="A* route">{robot.route.length ? `${robot.route.length} cells` : <Dash />}</Row>
           <Row label="Blocked for">{robot.blockedTicks ? `${robot.blockedTicks} ticks` : <Dash />}</Row>
         </dl>
-        <p className="mt-2 text-[11px] leading-snug text-text-dim">
-          Spatial A* route. Robots wait for occupied cells and replan after a bounded wait; time-indexed reservations
-          arrive in Mission 004.
-        </p>
       </Section>
+
+      <CoordinationSection robot={robot} snapshot={snapshot} />
 
       {custody ? (
         <Section title="Package custody" aside={<span className="font-mono text-[10px] text-text-dim">{custody.id}</span>}>
@@ -248,6 +246,121 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
         </dl>
       </Section>
     </>
+  );
+}
+
+// ------------------------------------------------------------ coordination
+
+const COORD_STATE: Record<RobotState["coordination"], { label: string; tone: Tone }> = {
+  moving: { label: "Proceeding", tone: "cyan" },
+  waiting: { label: "Waiting", tone: "amber" },
+  holding: { label: "Holding", tone: "neutral" },
+  dwelling: { label: "At station", tone: "cyan" },
+  failed: { label: "Failed", tone: "red" },
+  "no-route": { label: "No route", tone: "red" },
+  blocked: { label: "Boxed in", tone: "amber" },
+};
+
+function CoordinationSection({ robot, snapshot }: { robot: RobotState; snapshot: SimulationSnapshot }) {
+  const select = useSimulationStore((s) => s.select);
+  const mission = robot.missionId ? snapshot.missions.find((m) => m.id === robot.missionId) : undefined;
+  const state = COORD_STATE[robot.coordination];
+  const waits = robot.plan.reduce((n, step, i) => {
+    const prev = i === 0 ? robot.position : robot.plan[i - 1];
+    return n + (step.x === prev.x && step.y === prev.y ? 1 : 0);
+  }, 0);
+  const until = robot.plan.at(-1)?.tick;
+  const decisions = snapshot.coordination.decisions.filter((d) => d.robotId === robot.id).slice(-4).reverse();
+
+  return (
+    <Section title="Coordination" aside={<StatusBadge tone={state.tone}>{state.label}</StatusBadge>}>
+      <dl>
+        <Row label="Movement priority">
+          {robot.priority}
+          {mission && mission.priority !== "normal" ? (
+            <span className={cn("ml-1.5", mission.priority === "urgent" ? "text-danger" : "text-amber")}>{mission.priority}</span>
+          ) : null}
+        </Row>
+        <Row label="Waiting for" mono={false}>
+          {robot.waitingFor ? (
+            <button
+              type="button"
+              onClick={() => select({ kind: "robot", id: robot.waitingFor! })}
+              className="font-mono text-[11.5px] text-amber underline-offset-2 hover:underline"
+            >
+              {robot.waitingFor}
+            </button>
+          ) : (
+            <Dash />
+          )}
+        </Row>
+        <Row label="Plan">{robot.planStatus ? `${robot.planStatus}${until ? ` · to T+${until}` : ""}` : <Dash />}</Row>
+        <Row label="Reserved ticks">{robot.plan.length || <Dash />}</Row>
+        <Row label="Planned waits">{waits || <Dash />}</Row>
+      </dl>
+      {robot.plan.length ? (
+        <ol className="mt-2 flex flex-wrap gap-1">
+          {robot.plan.slice(0, 8).map((step) => (
+            <li key={step.tick} className="rounded border border-line bg-surface-sunken/60 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">
+              <span className="text-text-dim">+{step.tick - snapshot.tick}</span> {step.x},{step.y}
+            </li>
+          ))}
+          {robot.plan.length > 8 ? <li className="px-1 font-mono text-[10px] text-text-dim">…</li> : null}
+        </ol>
+      ) : null}
+      {decisions.length ? (
+        <ul className="mt-3 flex flex-col gap-1 border-l border-line pl-3">
+          {decisions.map((d) => (
+            <li key={d.seq} className="text-[11px] leading-snug text-text-secondary">
+              <span className="tabular mr-1.5 font-mono text-text-dim">{formatTick(d.tick)}</span>
+              {d.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="mt-2 text-[11px] leading-snug text-text-dim">
+        Space-time A* over the shared reservation table (cells + directed edges). Priority = mission urgency + carry
+        bonus + aging while waiting.
+      </p>
+    </Section>
+  );
+}
+
+function CoordinationOverview({ snapshot }: { snapshot: SimulationSnapshot }) {
+  const select = useSimulationStore((s) => s.select);
+  const { coordination, tick } = snapshot;
+  const future = coordination.reservations.filter((r) => r.tick > tick).length;
+  const recent = coordination.decisions.filter((d) => d.kind !== "wait" || d.otherRobotId).slice(-8).reverse();
+  return (
+    <Section title="Coordination" aside={<span className="font-mono text-[10px] text-text-dim">horizon {coordination.horizon}</span>}>
+      <dl>
+        <Row label="Reserved cells">{future}</Row>
+        <Row label="Waiting robots">{coordination.waitGraph.length}</Row>
+        <Row label="Plans computed">{coordination.stats.plansComputed}</Row>
+        <Row label="Right-of-way decisions">{coordination.stats.preemptions}</Row>
+        <Row label="Moves rejected at commit">{coordination.stats.commitRejections}</Row>
+      </dl>
+      {recent.length ? (
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {recent.map((d) => (
+            <li key={d.seq}>
+              <button
+                type="button"
+                onClick={() => select({ kind: "robot", id: d.robotId })}
+                className="w-full rounded px-1 py-0.5 text-left text-[11px] leading-snug text-text-secondary outline-none hover:bg-white/[0.03] focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="tabular mr-1.5 font-mono text-text-dim">{formatTick(d.tick)}</span>
+                <span className={d.kind === "preempt" ? "text-lime" : d.kind === "yield" ? "text-amber" : d.kind === "commit-reject" ? "text-danger" : undefined}>
+                  {d.message}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-[11px] text-text-dim">No conflicts yet. Start playback to see coordination decisions.</p>
+      )}
+    </Section>
   );
 }
 
@@ -420,6 +533,7 @@ function FleetRoster({ snapshot }: { snapshot: SimulationSnapshot }) {
         </ul>
         <p className="mt-2 text-[11px] text-text-dim">Select a robot, station or cell on the canvas to inspect it.</p>
       </Section>
+      <CoordinationOverview snapshot={snapshot} />
       <Section title="Legend">
         <Legend />
       </Section>
@@ -437,6 +551,10 @@ function Legend() {
     { swatch: <span className="h-3 w-3 border-y border-amber/60 bg-amber/15" />, label: "Narrow passage" },
     { swatch: <span className="h-0 w-3 border-t-2 border-dashed border-cyan/70" />, label: "A* route" },
     { swatch: <span className="size-3 rounded-[2px] border border-danger bg-danger/20" />, label: "Closed cell" },
+    { swatch: <span className="size-2 rounded-[1px] bg-cyan/50" />, label: "Reserved cell" },
+    { swatch: <span className="size-3 rounded-[2px] border border-dashed border-cyan" />, label: "Planned stop" },
+    { swatch: <span className="h-0 w-3 border-t border-dashed border-amber" />, label: "Waiting for" },
+    { swatch: <span className="size-2 rotate-45 bg-danger" />, label: "Urgent mission" },
     { swatch: <span className="size-2.5 rounded-[2px] bg-amber" />, label: "Carrying package" },
     { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Holding / waiting" },
     { swatch: <span className="size-3 rounded-[3px] border-2 border-danger" />, label: "Failed" },

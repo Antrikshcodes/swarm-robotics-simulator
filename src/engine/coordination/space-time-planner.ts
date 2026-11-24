@@ -39,6 +39,12 @@ export interface SpaceTimeRequest {
   readonly table: ReservationTable;
   readonly horizon: number;
   readonly maxExpansions: number;
+  /**
+   * Ticks the robot will stay on the goal (station handling). When set, the
+   * goal only has to be free for [arrival, arrival + goalDwell + 1] instead of
+   * forever, so a robot can use a dock another robot will need later.
+   */
+  readonly goalDwell?: number;
 }
 
 export type SpaceTimeStatus =
@@ -80,7 +86,9 @@ export function neighbourCells(cell: number, width: number, height: number): num
 }
 
 export function planSpaceTime(req: SpaceTimeRequest): SpaceTimePlan {
-  const { robotId, start, startTick, goal, grid, distances, table, horizon, maxExpansions } = req;
+  const { robotId, start, startTick, goal, grid, distances, table, horizon, maxExpansions, goalDwell } = req;
+  const goalFree = (t: number) =>
+    goalDwell === undefined ? table.canHoldFrom(robotId, t, goal) : table.canStay(robotId, t, t + goalDwell + 1, goal);
   const cellCount = grid.width * grid.height;
   const startH = distanceFrom(grid, distances, start);
   if (startH < 0) return { status: "unreachable", positions: [start], expanded: 0, waits: 0 };
@@ -107,7 +115,7 @@ export function planSpaceTime(req: SpaceTimeRequest): SpaceTimePlan {
     expanded += 1;
 
     const safeToHold = table.canHoldFrom(robotId, node.t, node.cell);
-    if (node.cell === goal && safeToHold) return finish(nodes, id, "complete", expanded);
+    if (node.cell === goal && goalFree(node.t)) return finish(nodes, id, "complete", expanded);
     if (safeToHold) {
       const b = best >= 0 ? nodes[best] : null;
       if (!b || node.h < b.h || (node.h === b.h && node.t < b.t)) best = id;
@@ -122,7 +130,7 @@ export function planSpaceTime(req: SpaceTimeRequest): SpaceTimePlan {
         if (!grid.passable(next, next === goal)) continue;
         if (distances[next] < 0) continue;
         // A goal station is never a through-route: enter it only to stay.
-        if (next === goal && !grid.passable(next, false) && !table.canHoldFrom(robotId, t1, next)) continue;
+        if (next === goal && !grid.passable(next, false) && !goalFree(t1)) continue;
       }
       // Waiting on a cell with no map entry (a station start) keeps its start distance.
       const h = isWait ? node.h : distances[next];

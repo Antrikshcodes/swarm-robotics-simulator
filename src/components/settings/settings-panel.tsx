@@ -50,6 +50,7 @@ const SHORTCUTS: [string, string][] = [
   ["F", "Fit warehouse to view"],
   ["V / H", "Select / pan tool"],
   ["G / C / P / L", "Grid / coordinates / routes / labels"],
+  ["Y / W", "Reservations / wait-for links"],
   ["← ↑ → ↓", "Pan (canvas focused)"],
 ];
 
@@ -107,6 +108,12 @@ export function SettingsPanel() {
           <ToggleRow pref="showCoordinates" label="Coordinate rulers" description="Column letters and row numbers on the canvas edges." />
           <ToggleRow pref="showRoutes" label="Routes" description="Each robot's remaining A* route and destination." />
           <ToggleRow pref="showLabels" label="Robot labels" description="Robot IDs beneath markers when zoomed in enough." />
+          <ToggleRow
+            pref="showReservations"
+            label="Reservations"
+            description="Cells each robot has reserved for future ticks (fading with time) and where it will stop."
+          />
+          <ToggleRow pref="showWaitLinks" label="Wait-for links" description="Amber arrows from a waiting robot to the robot it is waiting for." />
         </Panel>
 
         <Panel>

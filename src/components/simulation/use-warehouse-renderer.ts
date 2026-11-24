@@ -83,6 +83,8 @@ export function useWarehouseRenderer({ containerRef, canvasRef, resolveView, ove
         showCoordinates: prefs.showCoordinates,
         showRoutes: prefs.showRoutes,
         showLabels: prefs.showLabels,
+        showReservations: prefs.showReservations,
+        showWaitLinks: prefs.showWaitLinks,
         selection: sim.selection,
         hover: hoverRef?.current ?? null,
         progress,

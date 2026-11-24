@@ -88,6 +88,20 @@ describe("space-time A*", () => {
     expect(r.positions.at(-1)).toBe(2); // waits next to the dock
   });
 
+  it("uses a dock another robot needs later if it can finish its dwell first", () => {
+    const g = grid(["...S"]);
+    const table = new ReservationTable(4);
+    // B will arrive at the dock at tick 10 and hold it.
+    table.reservePlan("B", 9, [3, 3]); // occupies cell 3 from tick 10, then holds it
+    const forever = planSpaceTime({ robotId: "A", start: 0, startTick: 0, goal: 3, grid: g, distances: buildDistanceMap(g, 3), table, horizon: 20, maxExpansions: 2000 });
+    expect(forever.status).toBe("partial"); // cannot hold it indefinitely
+    const dwell = planSpaceTime({ robotId: "A", start: 0, startTick: 0, goal: 3, grid: g, distances: buildDistanceMap(g, 3), table, horizon: 20, maxExpansions: 2000, goalDwell: 3 });
+    expect(dwell.status).toBe("complete"); // arrives at 3, needs 3..7, B comes at 10
+    expect(dwell.positions.at(-1)).toBe(3);
+    const tooLong = planSpaceTime({ robotId: "A", start: 0, startTick: 0, goal: 3, grid: g, distances: buildDistanceMap(g, 3), table, horizon: 20, maxExpansions: 2000, goalDwell: 8 });
+    expect(tooLong.status).toBe("partial"); // 3 + 8 + 1 overlaps B's arrival
+  });
+
   it("enters stations only as the goal", () => {
     const g = grid(["S..", "..."]);
     const r = plan(g, new ReservationTable(6), "A", g.at(1, 0), g.at(2, 1));

@@ -95,6 +95,12 @@ export class ReservationTable {
     return swap !== undefined && swap !== robotId ? swap : undefined;
   }
 
+  /** True if `robotId` can occupy `cell` for every tick in [from, to] (inclusive). */
+  canStay(robotId: string, from: number, to: number, cell: number): boolean {
+    for (let t = from; t <= to; t += 1) if (!this.canOccupy(robotId, t, cell)) return false;
+    return true;
+  }
+
   /**
    * True if `robotId` can stay on `cell` from tick `t` onwards: no other
    * robot has a cell reservation there at any later tick, and no other hold.
@@ -126,7 +132,7 @@ export class ReservationTable {
    * Throws if any reservation is owned by another robot — callers must only
    * reserve plans produced against this table.
    */
-  reservePlan(robotId: string, startTick: number, positions: readonly number[]): void {
+  reservePlan(robotId: string, startTick: number, positions: readonly number[], options: { hold?: boolean } = {}): void {
     const index = this.index(robotId);
     for (let i = 1; i < positions.length; i += 1) {
       const t = startTick + i;
@@ -152,6 +158,10 @@ export class ReservationTable {
         edgeBucket.set(key, robotId);
         index.edges.push([t, key]);
       }
+    }
+    if (options.hold === false) {
+      this.release(robotId, Number.POSITIVE_INFINITY); // drop any previous hold only
+      return;
     }
     this.setHold(robotId, positions[positions.length - 1], startTick + positions.length - 1);
   }

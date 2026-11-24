@@ -381,6 +381,7 @@ export class WarehouseEngine implements SimulationSource {
         goal: robot.goal ? this.cellIndex(robot.goal) : this.cellIndex(robot.position),
         priority: this.priorityOf(robot),
         mode: modes.get(robot.spec.id)!,
+        goalDwell: this.goalDwell(robot),
       })),
     );
 
@@ -446,6 +447,14 @@ export class WarehouseEngine implements SimulationSource {
     }
     this.currentTarget.set(robot.spec.id, target);
     return "mobile";
+  }
+
+  /** Ticks the robot will handle at its current goal station, if it is one. */
+  private goalDwell(robot: RobotRuntime): number | undefined {
+    const target = this.currentTarget.get(robot.spec.id);
+    if (target?.kind === "pickup") return this.scenario.definition.handling.loadTicks;
+    if (target?.kind === "dropoff") return this.scenario.definition.handling.unloadTicks;
+    return undefined;
   }
 
   /** Movement priority: mission urgency, then carrying, then aging while waiting. */

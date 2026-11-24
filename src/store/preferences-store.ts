@@ -12,6 +12,8 @@ export interface Preferences {
   showCoordinates: boolean;
   showRoutes: boolean;
   showLabels: boolean;
+  showReservations: boolean;
+  showWaitLinks: boolean;
   /** Animate robots between ticks. Always off when the OS asks for reduced motion. */
   interpolateMotion: boolean;
   /** Wall-clock duration of one tick at 1× speed. */
@@ -24,6 +26,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showCoordinates: true,
   showRoutes: true,
   showLabels: true,
+  showReservations: true,
+  showWaitLinks: true,
   interpolateMotion: true,
   tickMs: 400,
 };
@@ -58,6 +62,8 @@ export const usePreferences = create<PreferencesState>()(
         showCoordinates: s.showCoordinates,
         showRoutes: s.showRoutes,
         showLabels: s.showLabels,
+        showReservations: s.showReservations,
+        showWaitLinks: s.showWaitLinks,
         interpolateMotion: s.interpolateMotion,
         tickMs: s.tickMs,
       }),
