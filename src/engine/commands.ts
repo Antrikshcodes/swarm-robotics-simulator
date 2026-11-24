@@ -1,4 +1,4 @@
-import type { GridPoint } from "../types/simulation";
+import type { GridPoint, MissionPriority } from "../types/simulation";
 import type { Result } from "./core/result";
 
 /**
@@ -18,7 +18,12 @@ export type EngineCommand =
   | { readonly type: "reset" }
   | { readonly type: "load-scenario"; readonly scenarioId: string }
   | { readonly type: "select-robot"; readonly robotId: string }
-  | { readonly type: "add-mission"; readonly pickupStationId: string; readonly dropoffStationId: string }
+  | {
+      readonly type: "add-mission";
+      readonly pickupStationId: string;
+      readonly dropoffStationId: string;
+      readonly priority?: MissionPriority;
+    }
   | { readonly type: "cancel-mission"; readonly missionId: string }
   | { readonly type: "close-aisle"; readonly cells: readonly GridPoint[]; readonly label?: string }
   | { readonly type: "reopen-aisle"; readonly closureId: string }

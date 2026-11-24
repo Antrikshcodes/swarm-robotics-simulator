@@ -86,6 +86,25 @@ export interface RobotStats {
   readonly replans: number;
 }
 
+/** Coordinator's view of a robot this tick. */
+export type CoordinationState =
+  | "moving"
+  | "waiting"
+  | "holding"
+  | "dwelling"
+  | "failed"
+  | "no-route"
+  | "blocked";
+
+/** Outcome of the robot's latest space-time plan. */
+export type PlanStatus = "complete" | "partial" | "unreachable" | "blocked";
+
+export interface PlannedStep {
+  readonly tick: number;
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface RobotState {
   readonly id: string;
   readonly model: string;
@@ -110,6 +129,14 @@ export interface RobotState {
   readonly route: readonly GridPoint[];
   /** Consecutive ticks the robot has been unable to take its next step. */
   readonly blockedTicks: number;
+  /** Movement priority used by the coordinator (higher moves first). */
+  readonly priority: number;
+  readonly coordination: CoordinationState;
+  readonly planStatus: PlanStatus | null;
+  /** Reserved future positions, one per tick (waits repeat the cell). */
+  readonly plan: readonly PlannedStep[];
+  /** Robot that holds the reservation this robot is waiting on, if any. */
+  readonly waitingFor: string | null;
   /** Human-readable explanation of the current activity. */
   readonly activityNote: string | null;
   readonly stats: RobotStats;
@@ -135,8 +162,11 @@ export interface MissionTransition {
   readonly to: MissionState;
 }
 
+export type MissionPriority = "normal" | "high" | "urgent";
+
 export interface Mission {
   readonly id: string;
+  readonly priority: MissionPriority;
   readonly packageId: string;
   readonly robotId: string | null;
   readonly pickupStationId: string;
@@ -189,6 +219,7 @@ export type SimEventKind =
   | "mission-created"
   | "mission-assigned"
   | "mission-cancelled"
+  | "mission-requeued"
   | "mission-recovery-required"
   | "pickup-started"
   | "package-picked-up"
@@ -196,6 +227,8 @@ export type SimEventKind =
   | "package-delivered"
   | "robot-waiting"
   | "robot-replanned"
+  | "right-of-way"
+  | "conflict-prevented"
   | "robot-no-path"
   | "robot-failed"
   | "robot-charging"
@@ -247,6 +280,63 @@ export interface FleetMetrics {
 
 export type SimulationDataSource = "engine";
 
+// ----------------------------------------------------------- coordination
+
+export type DecisionKind = "wait" | "yield" | "preempt" | "replan" | "no-route" | "commit-reject";
+
+export interface CoordinationDecision {
+  readonly seq: number;
+  readonly tick: number;
+  readonly kind: DecisionKind;
+  readonly robotId: string;
+  readonly otherRobotId?: string;
+  readonly cell?: number;
+  readonly message: string;
+}
+
+export interface CoordinatorStats {
+  readonly plansComputed: number;
+  readonly nodesExpanded: number;
+  readonly preemptions: number;
+  readonly commitRejections: number;
+  readonly plannedWaits: number;
+  readonly distanceMapsBuilt: number;
+  readonly lastTickPlans: number;
+}
+
+export interface CellReservation {
+  readonly tick: number;
+  readonly x: number;
+  readonly y: number;
+  readonly robotId: string;
+}
+
+export interface HoldReservation {
+  readonly x: number;
+  readonly y: number;
+  readonly robotId: string;
+  readonly fromTick: number;
+}
+
+/** Edge of the wait-for graph: `robotId` cannot progress because of `waitingFor`. */
+export interface WaitForEdge {
+  readonly robotId: string;
+  readonly waitingFor: string;
+  readonly ticks: number;
+}
+
+export interface CoordinationSnapshot {
+  /** Cell reservations from the current tick onwards (current tick = present positions). */
+  readonly reservations: readonly CellReservation[];
+  readonly holds: readonly HoldReservation[];
+  /** Recent coordinator decisions, oldest first, bounded. */
+  readonly decisions: readonly CoordinationDecision[];
+  /** Wait-for graph for deadlock detection (Mission 004). */
+  readonly waitGraph: readonly WaitForEdge[];
+  readonly stats: CoordinatorStats;
+  readonly horizon: number;
+}
+
 export interface SimulationSnapshot {
   readonly source: SimulationDataSource;
   readonly scenarioId: string;
@@ -263,6 +353,7 @@ export interface SimulationSnapshot {
   readonly movements: readonly MovementRecord[];
   /** Tick of every completed delivery (for throughput analytics). */
   readonly deliveryTicks: readonly number[];
+  readonly coordination: CoordinationSnapshot;
   readonly metrics: FleetMetrics;
 }
 

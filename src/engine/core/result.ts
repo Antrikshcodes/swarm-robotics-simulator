@@ -27,6 +27,7 @@ export type EngineErrorCode =
   | "already-running"
   | "not-running"
   | "invalid-tick"
+  | "invalid-priority"
   | "no-path";
 
 export interface EngineError {

@@ -1,4 +1,4 @@
-import type { GridPoint, Heading, StationKind, WarehouseLayout } from "../types/simulation";
+import type { GridPoint, Heading, MissionPriority, StationKind, WarehouseLayout } from "../types/simulation";
 import type { WorldCommand } from "./commands";
 import { cellKindAt, inBounds, isTraversable, parseLayout, pointKey } from "./world/layout";
 
@@ -24,6 +24,7 @@ export interface RobotSpec {
 export interface MissionSpec {
   readonly pickup: string;
   readonly dropoff: string;
+  readonly priority?: MissionPriority;
 }
 
 export interface MissionFeed {
@@ -33,6 +34,8 @@ export interface MissionFeed {
   readonly maxOpen: number;
   /** Candidate pickup → drop-off pairs; the seeded PRNG picks one. */
   readonly routes: readonly MissionSpec[];
+  /** Probability that a generated mission is high / urgent priority. */
+  readonly priorityMix?: { readonly high: number; readonly urgent: number };
 }
 
 export interface ScheduledCommand {

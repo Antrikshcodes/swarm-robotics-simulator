@@ -1,9 +1,11 @@
 import type {
   Closure,
+  CoordinationSnapshot,
   EventSeverity,
   GridPoint,
   Heading,
   Mission,
+  MissionPriority,
   MissionState,
   MovementRecord,
   Package,
@@ -36,11 +38,13 @@ import {
 import { checkInvariants } from "./invariants";
 import { BLOCKED_ALERT_TICKS, LOW_BATTERY_THRESHOLD, computeMetrics } from "./metrics";
 import { createMission, isActiveMission, transitionMission } from "./missions/mission-lifecycle";
-import { findPath, type PathResult } from "./pathfinding/astar";
+import { Coordinator, type CoordMode, type RobotCoordination } from "./coordination/coordinator";
+import { resolveMoves } from "./coordination/move-resolver";
+import type { PlanningGrid } from "./coordination/space-time-planner";
 import { validateRobotTransition } from "./robots/robot-lifecycle";
 import type { CompiledScenario, MissionSpec, RobotSpec } from "./scenario";
 import { getCompiledScenario, SCENARIOS } from "./scenarios";
-import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, neighbours, pointKey, samePoint, stationAt } from "./world/layout";
+import { cellKindAt, inBounds, isStationKind, isTraversableKind, isValidPoint, samePoint, stationAt } from "./world/layout";
 
 /**
  * The simulation source the UI talks to. Implemented by WarehouseEngine;
@@ -66,8 +70,10 @@ export interface EngineOptions {
 const MAX_EVENTS = 300;
 const MAX_MOVEMENTS = 400;
 const MAX_FINISHED_MISSIONS = 200;
-/** Base consecutive blocked ticks before replanning around other robots. */
-const REPLAN_AFTER = 4;
+/** Movement priority weights (see priorityOf). */
+const MISSION_WEIGHT: Record<MissionPriority, number> = { normal: 10, high: 30, urgent: 60 };
+const CARRY_BONUS = 5;
+const MAX_AGING = 24;
 const MIN_ASSIGN_BATTERY = 15;
 const SEEK_CHARGE_BELOW = 25;
 const CHARGE_UNTIL = 90;
@@ -90,14 +96,12 @@ interface RobotRuntime {
   battery: number;
   missionId: string | null;
   packageId: string | null;
-  path: GridPoint[];
   goal: GridPoint | null;
   goalStationId: string | null;
   /** Charger chosen for a low-battery top-up, if any. */
   chargerId: string | null;
   dwell: number;
   blockedTicks: number;
-  needsReplan: "closure" | null;
   noPathAnnounced: boolean;
   lowBatteryFlag: boolean;
   note: string | null;
@@ -131,16 +135,20 @@ const clampBattery = (v: number) => Math.min(100, Math.max(0, v));
  * Tick order (fixed):
  *   1. tick += 1
  *   2. scenario-scheduled world commands for this tick
- *   3. seeded mission feed
- *   4. assignment: queued missions → nearest available robot (A* cost, then rank)
- *   5. robots update in ID order (dwell, arrive, plan, wait or move)
- *   6. logged user commands for this tick (replay only)
- *   7. invariant check (outside production)
+ *   3. seeded mission feed (skips stations blocked by failed robots)
+ *   4. assignment: queued missions (most urgent first) → nearest available
+ *      robot by cached static distance, ties by rank
+ *   5. prepare: station handling, goals, arrivals — no movement
+ *   6. coordinate: prioritised space-time planning over the reservation table
+ *   7. commit: resolveMoves() checks the whole fleet's moves at once
+ *   8. apply moves, arrivals, waits; promote coordinator decisions to events
+ *   9. logged user commands for this tick (replay only)
+ *  10. invariant check (outside production)
  *
- * Movement uses a sequential occupancy guard: a robot may only enter a cell
- * no other robot holds at that moment, so cell collisions and head-on swaps
- * cannot occur. It is NOT reservation-based coordination (Mission 004):
- * robots can queue, wait and need bounded replanning to get past each other.
+ * Every committed move was reserved in the time-indexed reservation table
+ * (cells + directed edges), so cell collisions and head-on swaps are
+ * prevented at planning time and checked again at commit time. Deadlock
+ * detection and failure recovery are Mission 004.
  */
 export class WarehouseEngine implements SimulationSource {
   private scenario: CompiledScenario;
@@ -156,7 +164,12 @@ export class WarehouseEngine implements SimulationSource {
   private missions = new Map<string, Mission>();
   private packages = new Map<string, Package>();
   private closures: Closure[] = [];
-  private closedCells = new Map<string, string>();
+  /** Closed cell index → closure id. */
+  private closedCells = new Map<number, string>();
+  private coordinator!: Coordinator;
+  private grid!: PlanningGrid;
+  /** Movement target per robot for the current tick (set in prepare). */
+  private currentTarget = new Map<string, Target>();
   private events: SimEvent[] = [];
   private movements: MovementRecord[] = [];
   private deliveryTicks: number[] = [];
@@ -303,18 +316,39 @@ export class WarehouseEngine implements SimulationSource {
       battery: spec.battery,
       missionId: null,
       packageId: null,
-      path: [],
       goal: null,
       goalStationId: null,
       chargerId: null,
       dwell: 0,
       blockedTicks: 0,
-      needsReplan: null,
       noPathAnnounced: false,
       lowBatteryFlag: spec.battery < LOW_BATTERY_THRESHOLD,
       note: null,
       stats: { movingTicks: 0, waitingTicks: 0, busyTicks: 0, distance: 0, deliveries: 0, replans: 0 },
     }));
+
+    const layout = this.scenario.layout;
+    this.grid = {
+      width: layout.width,
+      height: layout.height,
+      passable: (cell, isGoal) => {
+        const kind = layout.cells[cell];
+        if (!isTraversableKind(kind) || this.closedCells.has(cell)) return false;
+        return isGoal || !isStationKind(kind);
+      },
+    };
+    this.coordinator = new Coordinator(this.grid);
+    this.coordinator.reset(
+      this.robots.map((r) => ({
+        id: r.spec.id,
+        rank: r.rank,
+        cell: this.cellIndex(r.position),
+        goal: this.cellIndex(r.position),
+        priority: 0,
+        mode: "mobile" as const,
+      })),
+    );
+    this.currentTarget = new Map();
 
     this.emit("scenario-loaded", "info", `Scenario "${definition.name}" loaded`);
     for (const job of definition.missions) this.createMissionInternal(job);
@@ -323,6 +357,7 @@ export class WarehouseEngine implements SimulationSource {
 
   private advance(): void {
     this.tick += 1;
+    const planTick = this.tick - 1;
     for (const entry of this.scenario.definition.schedule ?? []) {
       if (entry.tick !== this.tick) continue;
       const result = this.applyWorld(entry.command);
@@ -331,11 +366,146 @@ export class WarehouseEngine implements SimulationSource {
     this.runFeed();
     this.assignMissions();
 
+    // Phase 1 — station work, goals and arrivals (no movement yet).
     for (const robot of this.robots) robot.previousPosition = robot.position;
-    const occupancy = new Map(this.robots.map((r) => [pointKey(r.position), r.spec.id]));
-    for (const robot of this.robots) this.updateRobot(robot, occupancy);
+    const modes = new Map<string, CoordMode>();
+    for (const robot of this.robots) modes.set(robot.spec.id, this.prepare(robot));
+
+    // Phase 2 — cooperative planning in priority order.
+    const intents = this.coordinator.plan(
+      planTick,
+      this.robots.map((robot) => ({
+        id: robot.spec.id,
+        rank: robot.rank,
+        cell: this.cellIndex(robot.position),
+        goal: robot.goal ? this.cellIndex(robot.goal) : this.cellIndex(robot.position),
+        priority: this.priorityOf(robot),
+        mode: modes.get(robot.spec.id)!,
+      })),
+    );
+
+    // Phase 3 — commit-time conflict check for the whole fleet at once.
+    const resolution = resolveMoves(intents);
+    this.coordinator.committed(this.tick, resolution.rejected);
+
+    // Phase 4 — apply moves, arrivals and waits.
+    for (const robot of this.robots) {
+      const mode = modes.get(robot.spec.id)!;
+      if (mode !== "mobile") continue;
+      const view = this.coordinator.robotView(robot.spec.id, this.tick);
+      const target = robot.goal;
+      const final = this.cellPoint(resolution.final.get(robot.spec.id)!);
+      if (!samePoint(final, robot.position)) {
+        this.moveTo(robot, final);
+        robot.blockedTicks = 0;
+        robot.noPathAnnounced = false;
+        const t = this.currentTarget;
+        const arrived = t.get(robot.spec.id);
+        // Arrive only where the plan ends (the coordinator holds the cell for us).
+        const planEnds = view.plan.every((step) => step.cell === this.cellIndex(robot.position));
+        if (arrived && samePoint(robot.position, arrived.cell) && planEnds) this.arrive(robot, arrived);
+      } else if (target && !samePoint(robot.position, target)) {
+        this.waiting(robot, view);
+      }
+    }
+    this.promoteDecisions();
     for (const robot of this.robots) this.updateBatteryFlag(robot);
     this.invalidate();
+  }
+
+  /** Phase 1 for one robot. Returns its coordination mode for this tick. */
+  private prepare(robot: RobotRuntime): CoordMode {
+    this.currentTarget.delete(robot.spec.id);
+    if (robot.status === "failed") return "failed";
+
+    if (robot.dwell > 0) {
+      robot.dwell -= 1;
+      robot.stats.busyTicks += 1;
+      robot.battery = clampBattery(robot.battery - DRAIN_WORK);
+      if (robot.dwell === 0) this.completeDwell(robot);
+      robot.goal = null;
+      return "dwelling";
+    }
+
+    const target = this.targetFor(robot);
+    robot.goal = target?.cell ?? null;
+    robot.goalStationId = target?.stationId ?? null;
+    if (!target) {
+      this.rest(robot);
+      return "mobile"; // may still be asked to make way
+    }
+    robot.action = target.action;
+    if (samePoint(robot.position, target.cell)) {
+      this.arrive(robot, target);
+      if (robot.dwell > 0) {
+        robot.goal = null;
+        return "dwelling";
+      }
+      robot.goal = null;
+      return "mobile";
+    }
+    this.currentTarget.set(robot.spec.id, target);
+    return "mobile";
+  }
+
+  /** Movement priority: mission urgency, then carrying, then aging while waiting. */
+  private priorityOf(robot: RobotRuntime): number {
+    if (robot.status === "failed") return 0;
+    const mission = robot.missionId ? this.missions.get(robot.missionId) : undefined;
+    if (!mission) return Math.min(robot.blockedTicks, 4);
+    return MISSION_WEIGHT[mission.priority] + (robot.packageId ? CARRY_BONUS : 0) + Math.min(robot.blockedTicks * 2, MAX_AGING);
+  }
+
+  private waiting(robot: RobotRuntime, view: RobotCoordination): void {
+    robot.blockedTicks = view.waitStreak;
+    robot.stats.waitingTicks += 1;
+    robot.battery = clampBattery(robot.battery - DRAIN_IDLE);
+    this.setStatus(robot, "waiting");
+    if (view.state === "no-route") {
+      robot.note = `No route to ${robot.goalStationId ?? "its goal"} (closure or sealed area)`;
+      if (robot.missionId) {
+        const mission = this.missions.get(robot.missionId)!;
+        if (mission.state === "to-pickup") this.setMission(mission.id, "assigned");
+        if (mission.state === "to-dropoff") this.setMission(mission.id, "carrying");
+      }
+      if (!robot.noPathAnnounced) {
+        robot.noPathAnnounced = true;
+        this.emit("robot-no-path", "warning", `${robot.spec.id} has no route to ${robot.goalStationId ?? "its goal"}`, {
+          robotId: robot.spec.id,
+          missionId: robot.missionId ?? undefined,
+        });
+      }
+      return;
+    }
+    robot.note = view.waitingFor
+      ? `Waiting: best next cell is reserved by ${view.waitingFor}`
+      : view.state === "blocked"
+        ? "Holding: no safe move this tick"
+        : "Waiting for a safe opening";
+    if (robot.blockedTicks === BLOCKED_ALERT_TICKS) {
+      this.emit(
+        "robot-waiting",
+        "warning",
+        `${robot.spec.id} waiting ${robot.blockedTicks} ticks${view.waitingFor ? ` for ${view.waitingFor} (reservation)` : ""}`,
+        { robotId: robot.spec.id, missionId: robot.missionId ?? undefined },
+      );
+    }
+  }
+
+  /** Coordinator decisions that matter to operators become engine events. */
+  private promoteDecisions(): void {
+    for (const d of this.coordinator.decisionsAt(this.tick)) {
+      if (d.kind === "preempt") {
+        this.emit("right-of-way", "info", d.message, { robotId: d.robotId });
+        const robot = this.robotById(d.robotId);
+        if (robot) robot.stats.replans += 1;
+      } else if (d.kind === "yield") {
+        const robot = this.robotById(d.robotId);
+        if (robot) robot.stats.replans += 1;
+      } else if (d.kind === "commit-reject") {
+        this.emit("conflict-prevented", "warning", d.message, { robotId: d.robotId });
+      }
+    }
   }
 
   private replayLogged(tick: number): void {
@@ -348,27 +518,60 @@ export class WarehouseEngine implements SimulationSource {
   private runFeed(): void {
     const feed = this.scenario.definition.feed;
     if (!feed || this.tick % feed.intervalTicks !== 0 || feed.routes.length === 0) return;
+    const blocked = (m: { pickup: string; dropoff: string }) =>
+      this.failedRobotAt(this.station(m.pickup).position) !== null || this.failedRobotAt(this.station(m.dropoff).position) !== null;
     let open = 0;
-    for (const m of this.missions.values()) if (m.state === "queued" || isActiveMission(m.state)) open += 1;
+    for (const m of this.missions.values()) {
+      if (m.state !== "queued" && !isActiveMission(m.state)) continue;
+      if (m.state === "queued" && blocked({ pickup: m.pickupStationId, dropoff: m.dropoffStationId })) continue;
+      open += 1;
+    }
     if (open >= feed.maxOpen) return;
-    this.createMissionInternal(feed.routes[this.prng.int(feed.routes.length)]);
+    // Upstream stops sending jobs to stations blocked by a failed robot.
+    const routes = feed.routes.filter((r) => !blocked(r));
+    if (routes.length === 0) return;
+    const route = routes[this.prng.int(routes.length)];
+    let priority: MissionPriority = route.priority ?? "normal";
+    if (feed.priorityMix) {
+      const roll = this.prng.next();
+      if (roll < feed.priorityMix.urgent) priority = "urgent";
+      else if (roll < feed.priorityMix.urgent + feed.priorityMix.high) priority = "high";
+    }
+    this.createMissionInternal({ ...route, priority });
   }
 
+  /**
+   * Queued missions, most urgent first then oldest, each go to the available
+   * robot with the shortest static distance to the pickup (ties: lower rank).
+   * Distances come from cached BFS maps, not per-robot searches.
+   */
   private assignMissions(): void {
-    for (const mission of [...this.missions.values()]) {
-      if (mission.state !== "queued") continue;
+    const queued = [...this.missions.values()]
+      .filter((m) => m.state === "queued")
+      .sort((a, b) => MISSION_WEIGHT[b.priority] - MISSION_WEIGHT[a.priority] || a.createdTick - b.createdTick || a.id.localeCompare(b.id));
+    for (const mission of queued) {
       const candidates = this.robots.filter(
         (r) => r.status !== "failed" && r.status !== "recovering" && r.missionId === null && r.dwell === 0 && r.battery >= MIN_ASSIGN_BATTERY,
       );
       if (candidates.length === 0) return;
       const pickup = this.station(mission.pickupStationId);
-      let best: { robot: RobotRuntime; path: readonly GridPoint[]; cost: number } | null = null;
-      for (const robot of candidates) {
-        const plan = this.plan(robot, pickup.position, false);
-        if (!plan.ok) continue;
-        if (!best || plan.cost < best.cost || (plan.cost === best.cost && robot.rank < best.robot.rank)) {
-          best = { robot, path: plan.path, cost: plan.cost };
+      const blockedBy = this.failedRobotAt(pickup.position) ?? this.failedRobotAt(this.station(mission.dropoffStationId).position);
+      if (blockedBy) {
+        if (!this.unreachableAnnounced.has(mission.id)) {
+          this.unreachableAnnounced.add(mission.id);
+          this.emit("robot-no-path", "warning", `${mission.id} held in queue: a station on its route is blocked by failed ${blockedBy}`, {
+            missionId: mission.id,
+            robotId: blockedBy,
+          });
         }
+        continue;
+      }
+      const goal = this.cellIndex(pickup.position);
+      let best: { robot: RobotRuntime; cost: number } | null = null;
+      for (const robot of candidates) {
+        const cost = this.coordinator.distance(goal, this.cellIndex(robot.position));
+        if (cost < 0) continue;
+        if (!best || cost < best.cost || (cost === best.cost && robot.rank < best.robot.rank)) best = { robot, cost };
       }
       if (!best) {
         if (!this.unreachableAnnounced.has(mission.id)) {
@@ -385,79 +588,19 @@ export class WarehouseEngine implements SimulationSource {
       this.setPackage(this.expect(reservePackage(this.pkg(mission.packageId), robot.spec.id, this.tick)));
       robot.missionId = mission.id;
       robot.chargerId = null;
-      robot.path = [...best.path];
       robot.goal = pickup.position;
       robot.goalStationId = pickup.id;
       robot.action = "travel-to-pickup";
       robot.blockedTicks = 0;
       robot.noPathAnnounced = false;
-      this.emit("mission-assigned", "info", `${mission.id} assigned to ${robot.spec.id} (${mission.pickupStationId} → ${mission.dropoffStationId}, ${best.cost} cells)`, {
-        robotId: robot.spec.id,
-        missionId: mission.id,
-        packageId: mission.packageId,
-      });
+      this.coordinator.invalidate(robot.spec.id);
+      this.emit(
+        "mission-assigned",
+        "info",
+        `${mission.id}${mission.priority !== "normal" ? ` (${mission.priority})` : ""} assigned to ${robot.spec.id} (${mission.pickupStationId} → ${mission.dropoffStationId}, ${best.cost} cells)`,
+        { robotId: robot.spec.id, missionId: mission.id, packageId: mission.packageId },
+      );
     }
-  }
-
-  private updateRobot(robot: RobotRuntime, occupancy: Map<string, string>): void {
-    if (robot.status === "failed") return;
-
-    // 1. Station handling in progress.
-    if (robot.dwell > 0) {
-      robot.dwell -= 1;
-      robot.stats.busyTicks += 1;
-      robot.battery = clampBattery(robot.battery - DRAIN_WORK);
-      if (robot.dwell === 0) this.completeDwell(robot);
-      return;
-    }
-
-    // 2. Decide where the robot should be.
-    const target = this.targetFor(robot);
-    robot.goal = target?.cell ?? null;
-    robot.goalStationId = target?.stationId ?? null;
-    if (!target) {
-      this.rest(robot);
-      return;
-    }
-    robot.action = target.action;
-    if (samePoint(robot.position, target.cell)) {
-      this.arrive(robot, target);
-      return;
-    }
-
-    // 3. Make sure the plan is valid, replanning if a closure invalidated it.
-    if (!this.pathValid(robot, target.cell)) {
-      const reason = robot.needsReplan;
-      robot.needsReplan = null;
-      const plan = this.plan(robot, target.cell, false);
-      if (!plan.ok) {
-        this.noPath(robot, plan);
-        return;
-      }
-      robot.path = [...plan.path];
-      robot.noPathAnnounced = false;
-      if (reason === "closure") {
-        robot.stats.replans += 1;
-        this.emit("robot-replanned", "info", `${robot.spec.id} replanned around a closure (${plan.cost} cells to ${target.stationId ?? "home"})`, {
-          robotId: robot.spec.id,
-          missionId: robot.missionId ?? undefined,
-        });
-      }
-    }
-
-    // 4. Occupancy guard: wait if the next cell is held right now.
-    const next = robot.path[0];
-    const holder = occupancy.get(pointKey(next));
-    if (holder && holder !== robot.spec.id) {
-      this.blocked(robot, target, next, holder, occupancy);
-      return;
-    }
-
-    // 5. Move one cell.
-    occupancy.delete(pointKey(robot.position));
-    occupancy.set(pointKey(next), robot.spec.id);
-    this.moveTo(robot, next);
-    if (samePoint(robot.position, target.cell)) this.arrive(robot, target);
   }
 
   private targetFor(robot: RobotRuntime): Target | null {
@@ -493,21 +636,26 @@ export class WarehouseEngine implements SimulationSource {
   }
 
   private freeCharger(robot: RobotRuntime): string | null {
-    const homes = new Set(this.robots.filter((r) => r !== robot).map((r) => pointKey(r.spec.home)));
-    const taken = new Set(this.robots.filter((r) => r !== robot && r.chargerId).map((r) => r.chargerId));
-    const chargers = this.scenario.layout.stations.filter(
-      (s) => s.kind === "charger" && !homes.has(pointKey(s.position)) && !taken.has(s.id),
-    );
+    // A charger is free if nobody is on it, nobody is heading to it, and — if
+    // it is another robot's home — that robot is out working on a mission.
+    const unavailable = (station: Station) =>
+      this.robots.some(
+        (r) =>
+          r !== robot &&
+          (samePoint(r.position, station.position) ||
+            r.chargerId === station.id ||
+            (samePoint(r.spec.home, station.position) && r.missionId === null)),
+      );
+    const chargers = this.scenario.layout.stations.filter((s) => s.kind === "charger" && !unavailable(s));
     let best: { id: string; cost: number } | null = null;
     for (const charger of chargers) {
-      const plan = this.plan(robot, charger.position, false);
-      if (plan.ok && (!best || plan.cost < best.cost)) best = { id: charger.id, cost: plan.cost };
+      const cost = this.coordinator.distance(this.cellIndex(charger.position), this.cellIndex(robot.position));
+      if (cost >= 0 && (!best || cost < best.cost)) best = { id: charger.id, cost };
     }
     return best?.id ?? null;
   }
 
   private arrive(robot: RobotRuntime, target: Target): void {
-    robot.path = [];
     robot.blockedTicks = 0;
     const handling = this.scenario.definition.handling;
     if (target.kind === "pickup") {
@@ -540,7 +688,7 @@ export class WarehouseEngine implements SimulationSource {
       });
       return;
     }
-    if (robot.status === "moving" || robot.status === "carrying") {
+    if (!samePoint(robot.position, robot.previousPosition)) {
       // Arrived home or at a charger this tick; rest from the next tick on.
       robot.note = target.kind === "charger" ? `Docked at ${target.stationId}` : "Parked at home";
       return;
@@ -549,7 +697,6 @@ export class WarehouseEngine implements SimulationSource {
   }
 
   private rest(robot: RobotRuntime): void {
-    robot.path = [];
     robot.blockedTicks = 0;
     const onCharger = cellKindAt(this.scenario.layout, robot.position) === "charger";
     // Hysteresis: start below CHARGE_RESUME_BELOW, continue to 100 %.
@@ -614,7 +761,6 @@ export class WarehouseEngine implements SimulationSource {
     const from = robot.position;
     robot.heading = headingFromDelta(from, next, robot.heading);
     robot.position = next;
-    robot.path.shift();
     robot.blockedTicks = 0;
     robot.stats.movingTicks += 1;
     robot.stats.busyTicks += 1;
@@ -636,129 +782,6 @@ export class WarehouseEngine implements SimulationSource {
     }
   }
 
-  private blocked(robot: RobotRuntime, target: Target, next: GridPoint, holder: string, occupancy: Map<string, string>): void {
-    robot.blockedTicks += 1;
-    robot.stats.waitingTicks += 1;
-    robot.battery = clampBattery(robot.battery - DRAIN_IDLE);
-    this.setStatus(robot, "waiting");
-    robot.note = `Waiting: next cell (${next.x}, ${next.y}) held by ${holder}`;
-    if (robot.blockedTicks === BLOCKED_ALERT_TICKS) {
-      this.emit("robot-waiting", "warning", `${robot.spec.id} blocked by ${holder} at (${next.x}, ${next.y})`, {
-        robotId: robot.spec.id,
-        missionId: robot.missionId ?? undefined,
-      });
-    }
-    // Bounded wait, then plan around every other robot's cell. In a mutual
-    // head-on block only the yielding robot replans first; the priority robot
-    // replans too only if the block outlasts a longer bound (no alternative
-    // found by the yielder), so the pair never stays stuck indefinitely.
-    const other = this.robotById(holder);
-    const mutual = other !== undefined && other.path.length > 0 && samePoint(other.path[0], robot.position);
-    const threshold = mutual && other
-      ? this.shouldYield(robot, other) ? REPLAN_AFTER : REPLAN_AFTER * 3
-      : REPLAN_AFTER + robot.rank;
-    if (robot.blockedTicks % threshold !== 0) return;
-    const plan = this.plan(robot, target.cell, true);
-    if (!plan.ok || plan.path.length === 0 || samePoint(plan.path[0], next)) {
-      // No alternative route (e.g. the goal is the other robot's cell): a
-      // yielding robot steps aside into a free neighbour to break the block.
-      if (mutual && other && this.shouldYield(robot, other)) this.stepAside(robot, other, holder, occupancy);
-      return;
-    }
-    robot.path = [...plan.path];
-    robot.stats.replans += 1;
-    this.emit("robot-replanned", "info", `${robot.spec.id} replanned around ${holder} after ${robot.blockedTicks} ticks (${plan.cost} cells)`, {
-      robotId: robot.spec.id,
-      missionId: robot.missionId ?? undefined,
-    });
-  }
-
-  private stepAside(robot: RobotRuntime, other: RobotRuntime, holder: string, occupancy: Map<string, string>): void {
-    const layout = this.scenario.layout;
-    const avoid = new Set(other.path.slice(0, 2).map(pointKey));
-    const spot = neighbours(robot.position).find((p) => {
-      if (!inBounds(layout, p)) return false;
-      const kind = cellKindAt(layout, p)!;
-      const key = pointKey(p);
-      return isTraversableKind(kind) && !isStationKind(kind) && !this.closedCells.has(key) && !occupancy.has(key) && !avoid.has(key);
-    });
-    if (!spot) return;
-    occupancy.delete(pointKey(robot.position));
-    occupancy.set(pointKey(spot), robot.spec.id);
-    robot.path = [spot];
-    this.moveTo(robot, spot);
-    robot.path = [];
-    robot.stats.replans += 1;
-    robot.note = `Stepped aside for ${holder}`;
-    this.emit("robot-replanned", "info", `${robot.spec.id} stepped aside to (${spot.x}, ${spot.y}) to let ${holder} pass`, {
-      robotId: robot.spec.id,
-      missionId: robot.missionId ?? undefined,
-    });
-  }
-
-  /** Yield rule for head-on blocks: loaded robots have priority, then lower rank (ID). */
-  private shouldYield(robot: RobotRuntime, other: RobotRuntime): boolean {
-    if (robot.packageId && !other.packageId) return false;
-    if (!robot.packageId && other.packageId) return true;
-    return robot.rank > other.rank;
-  }
-
-  private noPath(robot: RobotRuntime, plan: Extract<PathResult, { ok: false }>): void {
-    robot.path = [];
-    robot.blockedTicks += 1;
-    robot.stats.waitingTicks += 1;
-    robot.battery = clampBattery(robot.battery - DRAIN_IDLE);
-    this.setStatus(robot, "waiting");
-    robot.note = `No route: ${plan.message}`;
-    if (robot.missionId) {
-      const mission = this.missions.get(robot.missionId)!;
-      if (mission.state === "to-pickup") this.setMission(mission.id, "assigned");
-      if (mission.state === "to-dropoff") this.setMission(mission.id, "carrying");
-    }
-    if (!robot.noPathAnnounced) {
-      robot.noPathAnnounced = true;
-      this.emit("robot-no-path", "warning", `${robot.spec.id} has no route to ${robot.goalStationId ?? "its goal"}: ${plan.message}`, {
-        robotId: robot.spec.id,
-        missionId: robot.missionId ?? undefined,
-      });
-    }
-  }
-
-  private pathValid(robot: RobotRuntime, goal: GridPoint): boolean {
-    if (robot.needsReplan) return false;
-    const { path } = robot;
-    if (path.length === 0 || !samePoint(path[path.length - 1], goal)) return false;
-    const first = path[0];
-    if (Math.abs(first.x - robot.position.x) + Math.abs(first.y - robot.position.y) !== 1) return false;
-    return !path.some((p) => this.closedCells.has(pointKey(p)));
-  }
-
-  /**
-   * A* from the robot's cell. Static blockers: closures, failed robots and
-   * robots parked or working at a station. With `avoidRobots`, every other
-   * robot's current cell is avoided too. The goal itself is never treated as
-   * robot-blocked (the occupancy guard handles a busy station).
-   */
-  private plan(robot: RobotRuntime, goal: GridPoint, avoidRobots: boolean): PathResult {
-    const goalKey = pointKey(goal);
-    const robotCells = new Set<string>();
-    for (const other of this.robots) {
-      if (other === robot) continue;
-      const stationary =
-        other.status === "failed" || other.dwell > 0 || (other.path.length === 0 && other.missionId === null);
-      if (avoidRobots || stationary) robotCells.add(pointKey(other.position));
-    }
-    return findPath({
-      layout: this.scenario.layout,
-      start: robot.position,
-      goal,
-      isBlocked: (p) => {
-        const key = pointKey(p);
-        return this.closedCells.has(key) || (key !== goalKey && robotCells.has(key));
-      },
-    });
-  }
-
   private updateBatteryFlag(robot: RobotRuntime): void {
     if (robot.status === "failed") return;
     if (robot.battery < LOW_BATTERY_THRESHOLD && !robot.lowBatteryFlag) {
@@ -774,7 +797,7 @@ export class WarehouseEngine implements SimulationSource {
   private applyWorld(command: WorldCommand): CommandResult {
     switch (command.type) {
       case "add-mission":
-        return this.addMission(command.pickupStationId, command.dropoffStationId);
+        return this.addMission(command.pickupStationId, command.dropoffStationId, command.priority);
       case "cancel-mission":
         return this.cancelMission(command.missionId);
       case "close-aisle":
@@ -786,15 +809,16 @@ export class WarehouseEngine implements SimulationSource {
     }
   }
 
-  private addMission(pickupId: string, dropoffId: string): CommandResult {
+  private addMission(pickupId: string, dropoffId: string, priority: MissionPriority = "normal"): CommandResult {
+    if (!(priority in MISSION_WEIGHT)) return err("invalid-priority", `Unknown mission priority "${String(priority)}"`);
     const pickup = this.scenario.layout.stations.find((s) => s.id === pickupId);
     const dropoff = this.scenario.layout.stations.find((s) => s.id === dropoffId);
     if (!pickup) return err("unknown-station", `Unknown pickup station "${pickupId}"`);
     if (!dropoff) return err("unknown-station", `Unknown drop-off station "${dropoffId}"`);
     if (pickup.kind !== "pickup") return err("invalid-station-kind", `${pickupId} is a ${pickup.kind} station, not a pickup`);
     if (dropoff.kind !== "dropoff") return err("invalid-station-kind", `${dropoffId} is a ${dropoff.kind} station, not a drop-off`);
-    const mission = this.createMissionInternal({ pickup: pickupId, dropoff: dropoffId });
-    return ok({ message: `${mission.id} queued (${pickupId} → ${dropoffId})`, entityId: mission.id });
+    const mission = this.createMissionInternal({ pickup: pickupId, dropoff: dropoffId, priority });
+    return ok({ message: `${mission.id} queued (${pickupId} → ${dropoffId}${priority !== "normal" ? `, ${priority}` : ""})`, entityId: mission.id });
   }
 
   private cancelMission(missionId: string): CommandResult {
@@ -811,9 +835,9 @@ export class WarehouseEngine implements SimulationSource {
       const robot = this.robotById(mission.robotId);
       if (robot && robot.missionId === missionId) {
         robot.missionId = null;
-        robot.path = [];
         robot.goal = null;
         robot.goalStationId = null;
+        this.coordinator.invalidate(robot.spec.id);
       }
     }
     this.emit("mission-cancelled", "info", `${missionId} cancelled`, { missionId, robotId: mission.robotId ?? undefined, packageId: mission.packageId });
@@ -823,7 +847,7 @@ export class WarehouseEngine implements SimulationSource {
   private closeAisle(cells: readonly GridPoint[], label?: string): CommandResult {
     if (!Array.isArray(cells) || cells.length === 0) return err("empty-closure", "A closure needs at least one cell");
     const layout = this.scenario.layout;
-    const unique = new Map<string, GridPoint>();
+    const unique = new Map<number, GridPoint>();
     for (const cell of cells) {
       if (!isValidPoint(cell) || !inBounds(layout, cell)) {
         return err("invalid-coordinates", `Cell ${JSON.stringify(cell)} is outside the ${layout.width}×${layout.height} warehouse`);
@@ -831,7 +855,7 @@ export class WarehouseEngine implements SimulationSource {
       const kind = cellKindAt(layout, cell)!;
       if (!isTraversableKind(kind)) return err("cell-not-closable", `(${cell.x}, ${cell.y}) is a ${kind} — already impassable`);
       if (isStationKind(kind)) return err("cell-not-closable", `(${cell.x}, ${cell.y}) is a station; stations cannot be closed`);
-      const key = pointKey(cell);
+      const key = this.cellIndex(cell);
       if (this.closedCells.has(key)) return err("already-closed", `(${cell.x}, ${cell.y}) is already closed by ${this.closedCells.get(key)}`);
       unique.set(key, { x: cell.x, y: cell.y });
     }
@@ -845,16 +869,17 @@ export class WarehouseEngine implements SimulationSource {
     };
     this.closures.push(closure);
     for (const key of unique.keys()) this.closedCells.set(key, id);
-    let affected = 0;
-    for (const robot of this.robots) {
-      if (robot.path.some((p) => unique.has(pointKey(p)))) {
-        robot.needsReplan = "closure";
-        affected += 1;
-      }
+    const affected = this.coordinator.worldChanged((cell) => unique.has(cell), this.tick);
+    for (const robotId of affected) this.robotById(robotId)!.stats.replans += 1;
+    this.emit(
+      "aisle-closed",
+      "warning",
+      `${id} closed ${unique.size} cell${unique.size > 1 ? "s" : ""}${affected.length ? ` · routes of ${affected.join(", ")} released and replanned` : ""}`,
+      { closureId: id },
+    );
+    if (affected.length) {
+      this.emit("robot-replanned", "info", `Reservations released for ${affected.join(", ")} after ${id}; new space-time routes on the next tick`, { closureId: id });
     }
-    this.emit("aisle-closed", "warning", `${id} closed ${unique.size} cell${unique.size > 1 ? "s" : ""}${affected ? ` · ${affected} route${affected > 1 ? "s" : ""} invalidated` : ""}`, {
-      closureId: id,
-    });
     return ok({ message: `${id} closed`, entityId: id });
   }
 
@@ -862,7 +887,8 @@ export class WarehouseEngine implements SimulationSource {
     const closure = this.closures.find((c) => c.id === closureId);
     if (!closure) return err("unknown-closure", `Unknown closure "${closureId}"`);
     this.closures = this.closures.filter((c) => c.id !== closureId);
-    for (const cell of closure.cells) this.closedCells.delete(pointKey(cell));
+    for (const cell of closure.cells) this.closedCells.delete(this.cellIndex(cell));
+    this.coordinator.worldChanged(() => false, this.tick);
     this.emit("aisle-reopened", "info", `${closureId} reopened`, { closureId });
     return ok({ message: `${closureId} reopened`, entityId: closureId });
   }
@@ -874,8 +900,8 @@ export class WarehouseEngine implements SimulationSource {
     const why = reason?.trim() || "Marked failed by operator";
     this.setStatus(robot, "failed");
     robot.action = "halted";
-    robot.path = [];
     robot.dwell = 0;
+    robot.goal = null;
     robot.blockedTicks = 0;
     robot.chargerId = null;
     robot.note = why;
@@ -895,9 +921,11 @@ export class WarehouseEngine implements SimulationSource {
         });
       }
     }
-    // Other robots' routes may cross the now-stationary robot.
-    for (const other of this.robots) {
-      if (other !== robot && other.path.some((p) => samePoint(p, robot.position))) other.needsReplan = "closure";
+    this.requeueMissionsBlockedAt(robot.position, robotId);
+    // Release its reservations, hold its cell permanently; affected robots replan.
+    const affected = this.coordinator.fail(robotId, this.cellIndex(robot.position), this.tick);
+    if (affected.length) {
+      this.emit("robot-replanned", "info", `Reservations crossing failed ${robotId} released for ${affected.join(", ")}`, { robotId });
     }
     return ok({ message: `${robotId} marked failed`, entityId: robotId });
   }
@@ -909,13 +937,20 @@ export class WarehouseEngine implements SimulationSource {
     this.packageSeq += 1;
     const missionId = `M-${1000 + this.missionSeq}`;
     const packageId = `PKG-${pad(this.packageSeq, 4)}`;
-    const mission = createMission({ id: missionId, packageId, pickupStationId: job.pickup, dropoffStationId: job.dropoff, tick: this.tick });
+    const mission = createMission({
+      id: missionId,
+      packageId,
+      pickupStationId: job.pickup,
+      dropoffStationId: job.dropoff,
+      tick: this.tick,
+      priority: job.priority ?? "normal",
+    });
     this.missions.set(missionId, mission);
     this.packages.set(
       packageId,
       createPackage({ id: packageId, missionId, originStationId: job.pickup, destinationStationId: job.dropoff, tick: this.tick }),
     );
-    this.emit("mission-created", "info", `${missionId} created: ${packageId} ${job.pickup} → ${job.dropoff}`, {
+    this.emit("mission-created", "info", `${missionId} created: ${packageId} ${job.pickup} → ${job.dropoff}${mission.priority !== "normal" ? ` · ${mission.priority}` : ""}`, {
       missionId,
       packageId,
     });
@@ -944,6 +979,48 @@ export class WarehouseEngine implements SimulationSource {
   private expect<T>(result: Result<T>): T {
     if (!result.ok) throw new InvariantViolation(this.tick, [`${result.error.code}: ${result.error.message}`]);
     return result.value;
+  }
+
+  private failedRobotAt(p: GridPoint): string | null {
+    return this.robots.find((r) => r.status === "failed" && samePoint(r.position, p))?.spec.id ?? null;
+  }
+
+  /**
+   * Scheduling response to a station becoming unusable before pickup: the
+   * mission returns to the queue and its robot is released. (Robot repair and
+   * custody transfer are failure recovery — Mission 004.)
+   */
+  private requeueMissionsBlockedAt(p: GridPoint, failedId: string): string[] {
+    const requeued: string[] = [];
+    for (const robot of this.robots) {
+      if (!robot.missionId || robot.status === "failed") continue;
+      const mission = this.missions.get(robot.missionId)!;
+      if (mission.state !== "assigned" && mission.state !== "to-pickup") continue;
+      const pickup = this.station(mission.pickupStationId).position;
+      const dropoff = this.station(mission.dropoffStationId).position;
+      if (!samePoint(pickup, p) && !samePoint(dropoff, p)) continue;
+      this.setPackage(this.expect(releaseReservation(this.pkg(mission.packageId), robot.spec.id, this.tick, `station blocked by failed ${failedId}`)));
+      this.missions.set(mission.id, this.expect(transitionMission(mission, "queued", this.tick, { robotId: null, assignedTick: null })));
+      robot.missionId = null;
+      robot.goal = null;
+      robot.goalStationId = null;
+      this.coordinator.invalidate(robot.spec.id);
+      requeued.push(mission.id);
+      this.emit("mission-requeued", "warning", `${mission.id} requeued: ${robot.spec.id} released because a station on its route is blocked by failed ${failedId}`, {
+        missionId: mission.id,
+        robotId: robot.spec.id,
+      });
+    }
+    return requeued;
+  }
+
+  private cellIndex(p: GridPoint): number {
+    return p.y * this.scenario.layout.width + p.x;
+  }
+
+  private cellPoint(index: number): GridPoint {
+    const { width } = this.scenario.layout;
+    return { x: index % width, y: Math.floor(index / width) };
   }
 
   private pkg(id: string): Package {
@@ -1017,27 +1094,58 @@ export class WarehouseEngine implements SimulationSource {
 
   // ============================================================== snapshot
 
+  private coordinationSnapshot(robots: readonly RobotState[]): CoordinationSnapshot {
+    const table = this.coordinator.table;
+    return {
+      reservations: table
+        .listCells()
+        .filter((r) => r.tick >= this.tick)
+        .map((r) => ({ tick: r.tick, robotId: r.robotId, ...this.cellPoint(r.cell) })),
+      holds: table.listHolds().map((h) => ({ robotId: h.robotId, fromTick: h.fromTick, ...this.cellPoint(h.cell) })),
+      decisions: this.coordinator.recentDecisions().slice(),
+      waitGraph: robots
+        .filter((r) => r.waitingFor !== null && r.status !== "failed")
+        .map((r) => ({ robotId: r.id, waitingFor: r.waitingFor!, ticks: r.blockedTicks })),
+      stats: this.coordinator.getStats(),
+      horizon: this.coordinator.horizon,
+    };
+  }
+
   private buildSnapshot(): SimulationSnapshot {
-    const robots: RobotState[] = this.robots.map((r) => ({
-      id: r.spec.id,
-      model: r.spec.model,
-      colorIndex: r.spec.colorIndex,
-      position: r.position,
-      previousPosition: r.previousPosition,
-      heading: r.heading,
-      status: r.status,
-      action: r.action,
-      battery: Math.round(r.battery * 10) / 10,
-      home: r.spec.home,
-      missionId: r.missionId,
-      packageId: r.packageId,
-      destinationStationId: r.status === "failed" ? null : r.goalStationId,
-      destination: r.status === "failed" ? null : r.goal,
-      route: r.path.slice(),
-      blockedTicks: r.blockedTicks,
-      activityNote: r.note,
-      stats: { ...r.stats },
-    }));
+    const robots: RobotState[] = this.robots.map((r) => {
+      const view = this.coordinator.robotView(r.spec.id, this.tick);
+      const plan = view.plan.map((step) => ({ tick: step.tick, ...this.cellPoint(step.cell) }));
+      const route: GridPoint[] = [];
+      for (const step of plan) {
+        const last = route[route.length - 1] ?? r.position;
+        if (step.x !== last.x || step.y !== last.y) route.push({ x: step.x, y: step.y });
+      }
+      return {
+        id: r.spec.id,
+        model: r.spec.model,
+        colorIndex: r.spec.colorIndex,
+        position: r.position,
+        previousPosition: r.previousPosition,
+        heading: r.heading,
+        status: r.status,
+        action: r.action,
+        battery: Math.round(r.battery * 10) / 10,
+        home: r.spec.home,
+        missionId: r.missionId,
+        packageId: r.packageId,
+        destinationStationId: r.status === "failed" ? null : r.goalStationId,
+        destination: r.status === "failed" ? null : r.goal,
+        route,
+        blockedTicks: r.blockedTicks,
+        priority: this.priorityOf(r),
+        coordination: view.state,
+        planStatus: view.planStatus,
+        plan,
+        waitingFor: view.waitingFor,
+        activityNote: r.note,
+        stats: { ...r.stats },
+      };
+    });
     const missions = [...this.missions.values()];
     const events = [...this.events, ...this.playbackEvents]
       .sort((a, b) => a.tick - b.tick || (a.id[0] === b.id[0] ? a.seq - b.seq : a.id[0] === "E" ? -1 : 1))
@@ -1055,6 +1163,7 @@ export class WarehouseEngine implements SimulationSource {
       events,
       movements: this.movements.slice(),
       deliveryTicks: this.deliveryTicks.slice(),
+      coordination: this.coordinationSnapshot(robots),
       metrics: computeMetrics(this.tick, robots, missions, this.deliveryTicks.length, this.closures.length),
     };
   }
