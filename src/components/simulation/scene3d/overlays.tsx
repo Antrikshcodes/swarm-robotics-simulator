@@ -7,7 +7,6 @@ import { Line } from "@react-three/drei";
 import type { Line2 } from "three-stdlib";
 import type { GridPoint, SimulationSnapshot, Station } from "@/types/simulation";
 import { frameOf, gridToWorld, type GridFrame } from "@/lib/scene3d/grid-to-world";
-import { stationColorForKind } from "@/lib/scene3d/projection";
 import { robotPoses } from "./robot-fleet";
 
 /**
@@ -31,7 +30,7 @@ export function Stations({ stations, frame }: { stations: readonly Station[]; fr
     <group>
       {stations.map((s) => {
         const w = gridToWorld(frame, s.position.x, s.position.y);
-        const color = stationColorForKind(s.kind);
+        const color = s.kind === "pickup" ? "#40c8e8" : s.kind === "dropoff" ? "#b7f34a" : "#c8d2d8";
         return (
           <group key={s.id} position={[w.x, 0, w.z]}>
             {/* Marker post in the pad corner (robots dock on the pad itself). */}
