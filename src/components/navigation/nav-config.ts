@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 export interface NavItem {
-  readonly href: "/" | "/simulation" | "/demo" | "/fleet" | "/missions" | "/incidents" | "/analytics" | "/settings";
+  readonly href: "/" | "/overview" | "/simulation" | "/demo" | "/fleet" | "/missions" | "/incidents" | "/analytics" | "/settings";
   readonly label: string;
   readonly section: "Operate" | "Monitor" | "System";
   readonly description: string;
@@ -23,7 +23,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
-    href: "/",
+    href: "/overview",
     label: "Overview",
     section: "Operate",
     description: "Fleet and mission status at a glance",
