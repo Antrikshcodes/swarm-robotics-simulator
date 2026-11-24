@@ -5,7 +5,7 @@ import type { DeadlockOptions } from "./deadlock/deadlock-manager";
 import type { WarehouseEngine } from "./warehouse-engine";
 
 const LAB = SCENARIOS.filter((s) => s.group === "lab").map((s) => s.id);
-const OPS = SCENARIOS.filter((s) => s.group !== "lab").map((s) => s.id);
+const OPS = SCENARIOS.filter((s) => (s.group ?? "operations") === "operations").map((s) => s.id);
 
 const DEADLOCK_KINDS = new Set([
   "deadlock_detected",

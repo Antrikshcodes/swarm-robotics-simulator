@@ -1177,7 +1177,7 @@ export class WarehouseEngine implements SimulationSource {
     this.emit(
       "aisle_reopened",
       "info",
-      `${closureId} reopened: ${closure.cells.length} cell${closure.cells.length > 1 ? "s" : ""} traversable again${improved.length ? ` · ${improved.join(", ")} replan shorter routes` : ""}`,
+      `${closureId} reopened: ${closure.cells.length} cell${closure.cells.length > 1 ? "s" : ""} traversable again${improved.length ? ` · ${improved.join(", ")} ${improved.length === 1 ? "replans a shorter route" : "replan shorter routes"}` : ""}`,
       { closureId, cell: closure.cells[0], robotIds: improved, reason: closure.label },
     );
     return ok({ message: `${closureId} reopened`, entityId: closureId });
