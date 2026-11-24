@@ -36,6 +36,12 @@
   --swarm-obstacle: #2a2326;
   --swarm-narrow: #f5b94226;
 
+  /* Chart series (validated: dataviz validate_palette.js, dark, surface
+     #19242a — lightness band, chroma, CVD ΔE ≥ 9.4, contrast ≥ 3:1). */
+  --swarm-chart-a: #1f9aba;
+  --swarm-chart-b: #8a6ee8;
+  --swarm-chart-c: #c4861f;
+
   /* Robot identity colours — deliberately avoid the semantic
      lime / amber / red signals so status is never ambiguous. */
   --robot-1: #40c8e8;
@@ -101,6 +107,9 @@
   --color-cyan: var(--swarm-cyan);
   --color-amber: var(--swarm-amber);
   --color-danger: var(--swarm-red);
+  --color-series-a: var(--swarm-chart-a);
+  --color-series-b: var(--swarm-chart-b);
+  --color-series-c: var(--swarm-chart-c);
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
