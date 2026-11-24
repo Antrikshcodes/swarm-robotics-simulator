@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BatteryWarning, Construction, Crosshair, History, Hourglass, LockOpen, OctagonAlert, RefreshCcwDot } from "lucide-react";
+import { BatteryWarning, Construction, Crosshair, History, Hourglass, LockOpen, OctagonAlert, RefreshCcwDot, RotateCcw } from "lucide-react";
 import { PageContainer, PageIntro } from "@/components/layout/page-container";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,13 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Stat } from "@/components/ui/stat";
 import { PlannedNote } from "@/components/ui/planned-note";
 import { DeadlockDetail } from "./deadlock-detail";
+import { RecoveryDetail } from "./recovery-detail";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { deriveIncidents, type Incident, type IncidentKind } from "@/lib/selectors";
 import { formatTick } from "@/lib/format";
 import { DEADLOCK_STATUS } from "@/lib/status";
-import type { SimEvent } from "@/types/simulation";
+import type { Package, SimEvent } from "@/types/simulation";
 import { cn } from "@/lib/utils";
 
 type Filter = "open" | "resolved" | "all";
@@ -26,9 +27,9 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
   "robot-failed": {
     label: "Robot failure",
     icon: OctagonAlert,
-    mission: "Later mission",
+    mission: "Mission 005",
     planned:
-      "Today the engine halts the robot, keeps package custody with it, marks the mission recovery-required, holds its cell permanently and makes other robots plan around it. The recovery manager will transfer custody explicitly and reassign the mission without losing delivery history.",
+      "A failed robot halts, holds its cell and is never assigned. Before pickup its mission is requeued and reassigned. While carrying, the package becomes recovery-required (custody stays with the failed robot); the nearest free robot drives beside it and takes custody in one atomic handover, then delivers. Rescuers that time out or fail are replaced, attempts are bounded, and Restore brings the robot back after a type-specific delay.",
   },
   "robot-blocked": {
     label: "Blocked robot",
@@ -54,9 +55,9 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
   "aisle-closure": {
     label: "Aisle closure",
     icon: Construction,
-    mission: "Later mission",
+    mission: "Mission 005",
     planned:
-      "Closed cells are excluded from new space-time routes; affected robots release their reservations and replan on the next tick. Robots already on a closed cell may leave it. Richer closure tooling (multi-cell selection, scheduled reopen) comes later.",
+      "Closed cells are excluded from every new space-time route. Robots whose routes cross them get route_invalidated, release their reservations and replan on the next tick (robot_route_replanned, or a safe hold when no route exists). A robot standing on a closed cell is never moved: it may leave, and nobody may enter. Reopening restores the cells and replans robots that gain a shorter route.",
   },
 };
 
@@ -94,6 +95,10 @@ export function IncidentConsole() {
 
   const reopen = (incident: Incident) => {
     if (incident.closureId) useSimulationStore.getState().dispatch({ type: "reopen_aisle", closureId: incident.closureId });
+  };
+
+  const restore = (incident: Incident) => {
+    if (incident.robotId) useSimulationStore.getState().dispatch({ type: "restore_robot", robotId: incident.robotId });
   };
 
   return (
@@ -202,9 +207,12 @@ export function IncidentConsole() {
               incident={selected}
               tick={snapshot.tick}
               events={snapshot.events}
+              packages={snapshot.packages}
+              robotFailed={snapshot.robots.some((r) => r.id === selected.robotId && r.status === "failed")}
               onLocate={locate}
               onReplay={replay}
               onReopen={reopen}
+              onRestore={restore}
             />
           ) : (
             <p className="px-4 py-12 text-center text-sm text-text-secondary">Select an incident to see details.</p>
@@ -219,18 +227,51 @@ function IncidentDetail({
   incident,
   tick,
   events,
+  packages,
+  robotFailed,
   onLocate,
   onReplay,
   onReopen,
+  onRestore,
 }: {
   incident: Incident;
   tick: number;
   events: readonly SimEvent[];
+  packages: readonly Package[];
+  robotFailed: boolean;
   onLocate: (i: Incident) => void;
   onReplay: (i: Incident) => void;
   onReopen: (i: Incident) => void;
+  onRestore: (i: Incident) => void;
 }) {
   const meta = KIND[incident.kind];
+  if (incident.failure) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 p-4">
+        <span className="text-sm font-medium">{incident.title}</span>
+        <RecoveryDetail failure={incident.failure} tasks={incident.recoveryTasks ?? []} packages={packages} events={events} tick={tick} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" className="border-line" onClick={() => onLocate(incident)}>
+            <Crosshair />
+            Locate {incident.robotId}
+          </Button>
+          {incident.open && robotFailed ? (
+            <Button size="sm" variant="outline" className="border-line" onClick={() => onRestore(incident)}>
+              <RotateCcw />
+              Restore {incident.robotId}
+            </Button>
+          ) : null}
+          <Button size="sm" variant="outline" className="border-line" onClick={() => onReplay(incident)}>
+            <History />
+            Replay from {formatTick(incident.openedTick)}
+          </Button>
+        </div>
+        <PlannedNote mission={meta.mission} className="mt-auto">
+          {meta.planned}
+        </PlannedNote>
+      </div>
+    );
+  }
   if (incident.deadlock) {
     return (
       <div className="flex flex-1 flex-col gap-4 p-4">

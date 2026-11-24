@@ -199,11 +199,11 @@ export function MissionBoard() {
         </Table>
       </Panel>
 
-      <PlannedNote mission="Mission 004">
-        Implemented: the full lifecycle, cancellation before pickup, requeue when a station is blocked by a failed robot,
-        and priorities — urgent and high missions are assigned first and their robots get movement priority. Missing:
-        deadlines, batching, assignment smarter than nearest robot, and automatic recovery of recovery-required
-        missions. The log keeps the latest 200 finished missions; hover a custody cell for the full custody trail.
+      <PlannedNote mission="Later mission">
+        Implemented: the full lifecycle, cancellation before pickup, priorities, requeue and reassignment when a robot
+        fails before pickup, and automatic recovery of recovery-required missions (a rescuer takes custody and resumes
+        delivery). Missing: deadlines, batching and assignment smarter than nearest robot. The log keeps the latest 200
+        finished missions; hover a custody cell for the full custody trail.
       </PlannedNote>
     </PageContainer>
   );

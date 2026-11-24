@@ -24,11 +24,9 @@ export function DataSourceBadge({ className, label = "Engine" }: { className?: s
       <TooltipContent className="max-w-72 flex-col items-start gap-1">
         <span>
           Live values from the deterministic in-browser engine: space-time reservations and cooperative A*, mission
-          scheduling with priorities, package custody and per-tick safety invariants.
+          scheduling with priorities, package custody, deadlock and failure recovery, and per-tick safety invariants.
         </span>
-        <span className="text-text-secondary">
-          Not yet: deadlock detection and recovery, robot failure recovery, backend.
-        </span>
+        <span className="text-text-secondary">Not yet: backend or persistence.</span>
       </TooltipContent>
     </Tooltip>
   );

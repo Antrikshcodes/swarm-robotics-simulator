@@ -2,6 +2,8 @@ import { BLOCKED_ALERT_TICKS, LOW_BATTERY_THRESHOLD } from "@/engine";
 import { formatTick } from "@/lib/format";
 import type {
   DeadlockIncident,
+  RecoveryTask,
+  RobotFailure,
   EventSeverity,
   RobotState,
   SimEvent,
@@ -34,6 +36,17 @@ export interface Incident {
   readonly open: boolean;
   /** Present for kind "deadlock": the engine's incident record. */
   readonly deadlock?: DeadlockIncident;
+  /** Present for kind "robot-failed": the failure record and the package-recovery tasks it caused. */
+  readonly failure?: RobotFailure;
+  readonly recoveryTasks?: readonly RecoveryTask[];
+}
+
+/** Recovery tasks opened for a failure (same robot, at or after the failure tick, before the next failure). */
+export function tasksForFailure(snapshot: SimulationSnapshot, failure: RobotFailure): RecoveryTask[] {
+  const next = snapshot.recovery.failures.find((f) => f.robotId === failure.robotId && f.tick > failure.tick);
+  return snapshot.recovery.tasks.filter(
+    (t) => t.failedRobotId === failure.robotId && t.createdTick >= failure.tick && (!next || t.createdTick < next.tick),
+  );
 }
 
 /**
@@ -47,22 +60,25 @@ export function deriveIncidents(snapshot: SimulationSnapshot): Incident[] {
 
   for (const robot of snapshot.robots) {
     if (robot.status === "failed" || robot.status === "recovering") {
-      const opened = lastEvent(snapshot.events, "robot_failed", robot.id);
+      const failure = robot.failure;
+      const tasks = failure ? tasksForFailure(snapshot, failure) : [];
+      const task = tasks.at(-1);
       const mission = snapshot.missions.find((m) => m.robotId === robot.id && m.state === "recovery-required");
-      const pkg = mission ? snapshot.packages.find((p) => p.id === mission.packageId) : undefined;
       incidents.push({
-        id: `INC-F-${robot.id}`,
+        id: `INC-F-${failure?.id ?? robot.id}`,
         kind: "robot-failed",
         severity: "critical",
-        title: `${robot.id} failed`,
-        detail: mission
-          ? `${robot.activityNote ?? "Failed"}. ${mission.id} is recovery-required; ${mission.packageId} is ${pkg?.state ?? "unknown"} and still held by ${robot.id}.`
+        title: robot.status === "recovering" ? `${robot.id} restoring` : `${robot.id} failed`,
+        detail: task
+          ? `${robot.activityNote ?? "Failed"} · ${task.id}: ${task.note}`
           : (robot.activityNote ?? "Failed"),
         robotId: robot.id,
-        missionId: mission?.id ?? null,
+        missionId: mission?.id ?? failure?.missionId ?? null,
         closureId: null,
-        openedTick: opened?.tick ?? snapshot.tick,
+        openedTick: failure?.tick ?? snapshot.tick,
         open: true,
+        failure: failure ?? undefined,
+        recoveryTasks: tasks,
       });
       continue;
     }
@@ -143,6 +159,28 @@ export function deriveIncidents(snapshot: SimulationSnapshot): Incident[] {
       openedTick: dl.detectedTick,
       open,
       deadlock: dl,
+    });
+  }
+
+  // Restored failures stay as resolved history.
+  for (const failure of snapshot.recovery.failures) {
+    if (failure.status !== "restored") continue;
+    const robot = snapshot.robots.find((r) => r.id === failure.robotId);
+    if (robot && robot.failure?.id === failure.id && (robot.status === "failed" || robot.status === "recovering")) continue;
+    const tasks = tasksForFailure(snapshot, failure);
+    incidents.push({
+      id: `INC-F-${failure.id}`,
+      kind: "robot-failed",
+      severity: "critical",
+      title: `${failure.robotId} failure resolved`,
+      detail: `Restored at ${failure.restoredTick === null ? "—" : formatTick(failure.restoredTick)}${tasks.length ? ` · ${tasks.map((t) => `${t.id} ${t.status}`).join(", ")}` : ""}`,
+      robotId: failure.robotId,
+      missionId: failure.missionId,
+      closureId: null,
+      openedTick: failure.tick,
+      open: false,
+      failure,
+      recoveryTasks: tasks,
     });
   }
 

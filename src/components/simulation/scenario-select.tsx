@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 const GROUPS = [
   { id: "operations", label: "Operations" },
   { id: "lab", label: "Deadlock lab" },
+  { id: "recovery", label: "Recovery lab" },
 ] as const;
 
 export function ScenarioSelect({ className, compact = false }: { className?: string; compact?: boolean }) {

@@ -168,7 +168,7 @@ function SystemStatus({ labelClass }: { labelClass: string }) {
           tone="lime"
           label="Reservations"
           value={String(reserved)}
-          title="Time-indexed cell and edge reservations held by the coordinator right now. Deadlock and failure recovery arrive in Mission 004."
+          title="Time-indexed cell and edge reservations held by the coordinator right now. Deadlock and failure recovery release and rebuild them."
           labelClass={labelClass}
         />
         <StatusRow

@@ -136,7 +136,7 @@ export function SettingsPanel() {
         </Panel>
       </div>
 
-      <PlannedNote mission="Mission 004+">
+      <PlannedNote mission="Later mission">
         Engine configuration (scenario seed, planning horizon, right-of-way and replanning thresholds, deadlock timeout, recovery policy) and
         backend connection settings will appear here once those systems exist. Nothing here is a placeholder control.
       </PlannedNote>

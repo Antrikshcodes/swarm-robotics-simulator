@@ -4,6 +4,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowUp,
+  ChevronDown,
+  HandHelping,
+  RotateCcw,
   Box,
   Crosshair,
   MapPin,
@@ -16,8 +19,15 @@ import {
   X,
 } from "lucide-react";
 import { cellKindAt, getScenario, isTraversable, stationAt } from "@/engine";
-import type { RobotState, SimulationSnapshot, Station } from "@/types/simulation";
+import type { FailureType, RobotState, SimulationSnapshot, Station } from "@/types/simulation";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { RobotChip } from "@/components/fleet/robot-chip";
@@ -28,6 +38,10 @@ import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
 import {
   DEADLOCK_STATUS,
+  FAILURE_STATUS,
+  FAILURE_TYPE,
+  RECOVERY_TASK_STATUS,
+  RESCUE_OUTCOME,
   MISSION_STATE,
   PACKAGE_STATE,
   ROBOT_ACTION,
@@ -111,6 +125,7 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
   const pkg = robot.packageId ?? mission?.packageId;
   const custody = pkg ? snapshot.packages.find((p) => p.id === pkg) : undefined;
   const failed = robot.status === "failed";
+  const restoring = robot.status === "recovering";
 
   return (
     <>
@@ -143,17 +158,43 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
             <Crosshair />
             Centre view
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={failed}
-            onClick={() => dispatch({ type: "fail_robot", robotId: robot.id, reason: "Marked failed by operator" })}
-          >
-            <PowerOff />
-            {failed ? "Failed" : "Mark failed"}
-          </Button>
+          {failed ? (
+            <Button size="sm" onClick={() => dispatch({ type: "restore_robot", robotId: robot.id })}>
+              <RotateCcw />
+              Restore
+            </Button>
+          ) : restoring ? (
+            <Button size="sm" variant="outline" className="border-line" disabled>
+              <RotateCcw />
+              Restoring…
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  <PowerOff />
+                  Fail robot
+                  <ChevronDown className="ml-auto" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-[11px] text-text-secondary">Inject failure type</DropdownMenuLabel>
+                {(Object.keys(FAILURE_TYPE) as FailureType[]).map((type) => (
+                  <DropdownMenuItem
+                    key={type}
+                    onSelect={() => dispatch({ type: "fail_robot", robotId: robot.id, failureType: type, reason: `${FAILURE_TYPE[type].label} (operator)` })}
+                  >
+                    {FAILURE_TYPE[type].label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
+        {robot.routeEvent ? <RouteEventNote robot={robot} /> : null}
       </div>
+
+      <RecoverySection robot={robot} snapshot={snapshot} />
 
       <Section title="Pose">
         <dl>
@@ -257,6 +298,112 @@ function RobotInspector({ robot, snapshot }: { robot: RobotState; snapshot: Simu
         </dl>
       </Section>
     </>
+  );
+}
+
+// ---------------------------------------------------------------- recovery
+
+const ROUTE_EVENT: Record<NonNullable<RobotState["routeEvent"]>["kind"], { label: string; tone: Tone }> = {
+  invalidated: { label: "Route invalidated", tone: "amber" },
+  replanned: { label: "Route replanned", tone: "lime" },
+  "no-route": { label: "No route", tone: "red" },
+};
+
+function RouteEventNote({ robot }: { robot: RobotState }) {
+  const event = robot.routeEvent!;
+  const meta = ROUTE_EVENT[event.kind];
+  return (
+    <p className="mt-2 flex items-center gap-2 text-[11px] leading-snug text-text-secondary">
+      <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
+      <span className="min-w-0 truncate" title={event.cause}>
+        {formatTick(event.tick)} · {event.cause}
+      </span>
+    </p>
+  );
+}
+
+/** Failure record, package-recovery task and recovery actions for a robot. */
+function RecoverySection({ robot, snapshot }: { robot: RobotState; snapshot: SimulationSnapshot }) {
+  const dispatch = useSimulationStore((s) => s.dispatch);
+  const select = useSimulationStore((s) => s.select);
+  const failure = robot.failure;
+  const role = robot.recoveryRole;
+  const task = role ? snapshot.recovery.tasks.find((t) => t.id === role.taskId) : undefined;
+  // A failed holder whose last task ended (failed / cancelled) can be restarted.
+  const stranded = snapshot.packages.find((p) => p.state === "recovery-required" && p.holderRobotId === robot.id);
+  const lastTask = stranded ? [...snapshot.recovery.tasks].reverse().find((t) => t.packageId === stranded.id) : undefined;
+  const shownTask = task ?? lastTask;
+  if (!failure && !shownTask) return null;
+  const recentlyRestored = failure?.status === "restored" && failure.restoredTick !== null && snapshot.tick - failure.restoredTick <= 30;
+  if (failure?.status === "restored" && !recentlyRestored && !shownTask) return null;
+  const status = shownTask ? RECOVERY_TASK_STATUS[shownTask.status] : null;
+  const attempt = shownTask?.attempts.at(-1);
+  const packageId = shownTask?.packageId ?? stranded?.id;
+
+  return (
+    <Section title="Failure & recovery" aside={failure ? <StatusBadge tone={FAILURE_STATUS[failure.status].tone}>{FAILURE_STATUS[failure.status].label}</StatusBadge> : null}>
+      {failure ? (
+        <dl>
+          <Row label="Failure" mono={false}>
+            {FAILURE_TYPE[failure.type].label} <span className="font-mono text-[11px] text-text-dim">{failure.id}</span>
+          </Row>
+          <Row label="At">
+            {formatTick(failure.tick)} · {cellRef(failure.position)}
+          </Row>
+          <Row label="Carrying then">{failure.packageId ?? <Dash />}</Row>
+          <Row label="Mission then">{failure.missionId ?? <Dash />}</Row>
+          {failure.restoredTick !== null ? <Row label="Restored">{formatTick(failure.restoredTick)}</Row> : null}
+        </dl>
+      ) : null}
+      {shownTask && status ? (
+        <div className={cn("mt-2 rounded-md border px-2.5 py-2", status.tone === "red" ? "border-danger/30 bg-danger/[0.05]" : status.tone === "lime" ? "border-lime/30 bg-lime/[0.04]" : "border-cyan/30 bg-cyan/[0.05]")}>
+          <div className="flex items-center justify-between gap-2 text-[11.5px]">
+            <span className="font-medium">
+              {shownTask.id} · {role?.role === "rescuer" ? `recovering ${shownTask.packageId}` : `${shownTask.packageId} stranded`}
+            </span>
+            <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-text-secondary">{shownTask.note}</p>
+          {attempt ? (
+            <p className="mt-1 text-[11px] text-text-secondary">
+              Attempt {attempt.attempt}:{" "}
+              <button type="button" className="font-mono text-cyan underline-offset-2 hover:underline" onClick={() => select({ kind: "robot", id: attempt.rescuerId })}>
+                {attempt.rescuerId}
+              </button>{" "}
+              → {cellRef(attempt.approachCell)} · {RESCUE_OUTCOME[attempt.outcome].label}
+            </p>
+          ) : null}
+          {role?.role === "rescuer" ? (
+            <p className="mt-1 text-[11px] text-text-secondary">
+              Holder:{" "}
+              <button type="button" className="font-mono text-danger underline-offset-2 hover:underline" onClick={() => select({ kind: "robot", id: shownTask.failedRobotId })}>
+                {shownTask.failedRobotId}
+              </button>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {packageId && stranded ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {shownTask?.status === "failed" || shownTask?.status === "cancelled" ? (
+            <Button size="sm" variant="outline" className="h-7 border-line text-xs" onClick={() => dispatch({ type: "start_package_recovery", packageId })}>
+              <HandHelping />
+              Start recovery
+            </Button>
+          ) : null}
+          {shownTask?.status === "handover" ? (
+            <Button size="sm" variant="outline" className="h-7 border-line text-xs" onClick={() => dispatch({ type: "complete_package_handover", packageId })}>
+              Complete handover
+            </Button>
+          ) : null}
+          {shownTask && ["pending", "en-route", "handover", "failed"].includes(shownTask.status) ? (
+            <Button size="sm" variant="outline" className="h-7 border-line text-xs" onClick={() => dispatch({ type: "cancel_recovery", packageId })}>
+              Cancel recovery
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </Section>
   );
 }
 
@@ -507,6 +654,7 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
   const dispatch = useSimulationStore((s) => s.dispatch);
   const closure = snapshot.closures.find((c) => c.cells.some((p) => p.x === x && p.y === y));
   const closable = kind !== null && isTraversable(snapshot.layout, point) && !station;
+  const aisle = closable && !closure ? aisleRun(snapshot, point) : [];
 
   return (
     <>
@@ -529,15 +677,39 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
             Reopen {closure.id}
           </Button>
         ) : closable ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            className="mt-3 w-full"
-            onClick={() => dispatch({ type: "close_aisle", cells: [point], label: `Cell ${cellRef(point)} closed by operator` })}
-          >
-            <Lock />
-            Close cell to traffic
-          </Button>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => dispatch({ type: "close_aisle", cells: [point], label: `Cell ${cellRef(point)} closed by operator` })}
+            >
+              <Lock />
+              Close cell
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={aisle.length < 2}
+              title={aisle.length >= 2 ? `Close ${aisle.length} cells: ${cellRef(aisle[0])}–${cellRef(aisle.at(-1)!)}` : "No aisle run through this cell"}
+              onClick={() =>
+                dispatch({
+                  type: "close_aisle",
+                  cells: aisle,
+                  label: `Aisle ${cellRef(aisle[0])}–${cellRef(aisle.at(-1)!)} closed by operator`,
+                })
+              }
+            >
+              <Lock />
+              Close aisle{aisle.length >= 2 ? ` (${aisle.length})` : ""}
+            </Button>
+          </div>
+        ) : null}
+        {robot && (closure || closable) ? (
+          <p className="mt-2 text-[11px] leading-snug text-text-secondary">
+            {closure
+              ? `${robot.id} stands on this closed cell: it is held in place, may leave, and nobody may enter.`
+              : `${robot.id} stands here. Closing keeps it in place (no teleport); it may leave and nobody else may enter.`}
+          </p>
         ) : null}
       </div>
       <Section title="Cell">
@@ -553,6 +725,31 @@ function CellInspector({ x, y, snapshot }: { x: number; y: number; snapshot: Sim
       </Section>
     </>
   );
+}
+
+/**
+ * The straight aisle run through a cell: the longer of its row or column
+ * segment of open, non-station cells, bounded by racks, walls, stations or
+ * closures, and capped at 8 cells centred on the cell.
+ */
+function aisleRun(snapshot: SimulationSnapshot, p: { x: number; y: number }): { x: number; y: number }[] {
+  const open = (x: number, y: number) =>
+    x >= 0 &&
+    y >= 0 &&
+    x < snapshot.layout.width &&
+    y < snapshot.layout.height &&
+    isTraversable(snapshot.layout, { x, y }) &&
+    !stationAt(snapshot.layout, { x, y }) &&
+    !snapshot.closures.some((c) => c.cells.some((q) => q.x === x && q.y === y));
+  const run = (dx: number, dy: number) => {
+    const cells = [{ x: p.x, y: p.y }];
+    for (let i = 1; i <= 3 && open(p.x - dx * i, p.y - dy * i); i += 1) cells.unshift({ x: p.x - dx * i, y: p.y - dy * i });
+    for (let i = 1; i <= 4 && cells.length < 8 && open(p.x + dx * i, p.y + dy * i); i += 1) cells.push({ x: p.x + dx * i, y: p.y + dy * i });
+    return cells;
+  };
+  const row = run(1, 0);
+  const column = run(0, 1);
+  return column.length > row.length ? column : row;
 }
 
 // ------------------------------------------------------------------ roster
@@ -622,6 +819,13 @@ function Legend() {
     { swatch: <span className="size-2.5 rounded-[2px] bg-amber" />, label: "Carrying package" },
     { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Waiting / congestion" },
     { swatch: <span className="size-3 rounded-[3px] border-2 border-danger/50 bg-danger/10" />, label: "Failed robot" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-amber" />, label: "Restoring" },
+    { swatch: <span className="size-3 rounded-[3px] border border-lime" />, label: "Restored" },
+    { swatch: <span className="size-3 rounded-[3px] border-2 border-dashed border-cyan" />, label: "Recovery robot" },
+    { swatch: <span className="size-2.5 rounded-[2px] bg-danger" />, label: "Package recovery" },
+    { swatch: <span className="size-3 rounded-[2px] border border-cyan bg-cyan/10" />, label: "Handover cell" },
+    { swatch: <span className="size-2.5 rounded-full bg-amber" />, label: "Route invalidated" },
+    { swatch: <span className="size-2.5 rounded-full bg-lime" />, label: "Route replanned" },
   ];
   return (
     <ul className="grid grid-cols-2 gap-x-3 gap-y-2">

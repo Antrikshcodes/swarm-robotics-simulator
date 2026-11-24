@@ -166,9 +166,9 @@ export function FleetRoster() {
         </Table>
       </Panel>
 
-      <PlannedNote mission="Mission 004">
-        Recovery actions — returning a failed robot to service and transferring its package custody — arrive with
-        the recovery manager. Today you can mark a robot failed from the Simulation Studio inspector. Battery uses a
+      <PlannedNote mission="Mission 005">
+        Fail a robot with a chosen failure type and restore it from the Simulation Studio inspector. Packages stranded
+        on a failed robot are taken over by the nearest free robot through an atomic custody handover. Battery uses a
         simplified drain / charge model.
       </PlannedNote>
     </PageContainer>

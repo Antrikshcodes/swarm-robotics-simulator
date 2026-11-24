@@ -183,13 +183,16 @@ export function drawWarehouse(
       Number(sel?.kind === "robot" && sel.id === a.id) - Number(sel?.kind === "robot" && sel.id === b.id),
   );
   const missionPriority = new Map(snapshot.missions.map((m) => [m.id, m.priority]));
+  const stranded = new Set(snapshot.packages.filter((p) => p.state === "recovery-required").map((p) => p.id));
+  drawRecoveryLinks(ctx, theme, view, snapshot, options.progress);
   for (const robot of ordered) {
-    drawRobot(ctx, theme, view, robot, options, sel?.kind === "robot" && sel.id === robot.id);
+    drawRobot(ctx, theme, view, robot, options, sel?.kind === "robot" && sel.id === robot.id, snapshot.tick, robot.packageId !== null && stranded.has(robot.packageId));
     const priority = robot.missionId ? missionPriority.get(robot.missionId) : undefined;
     if (priority === "urgent" || priority === "high") drawPriorityFlag(ctx, theme, view, robot, options.progress, priority);
   }
   // On top of robots so labels never hide who is waiting for whom.
   if (options.showWaitLinks) drawWaitLinks(ctx, theme, view, snapshot, options.progress);
+  for (const robot of snapshot.robots) drawRouteEventBadge(ctx, theme, view, robot, options.progress, snapshot.tick);
 
   if (options.showCoordinates) drawRulers(ctx, theme, view, layout.width, layout.height);
 }
@@ -597,6 +600,81 @@ function drawDeadlockOverlays(ctx: CanvasRenderingContext2D, theme: CanvasTheme,
   ctx.restore();
 }
 
+/**
+ * Package recovery: a dashed cyan link from each rescuer to the failed robot
+ * it is recovering, and the handover cell beside the failed robot.
+ */
+function drawRecoveryLinks(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: RenderView, snapshot: SimulationSnapshot, progress: number) {
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  ctx.save();
+  for (const task of snapshot.recovery.tasks) {
+    if (task.status !== "en-route" && task.status !== "handover") continue;
+    const attempt = task.attempts.at(-1);
+    const rescuer = snapshot.robots.find((r) => r.id === task.rescuerId);
+    const holder = snapshot.robots.find((r) => r.id === task.failedRobotId);
+    if (!attempt || !rescuer || !holder) continue;
+    // Handover cell.
+    const hx = ox + attempt.approachCell.x * cell;
+    const hy = oy + attempt.approachCell.y * cell;
+    const inset = cell * 0.12;
+    ctx.fillStyle = withAlpha(theme.cyan, task.status === "handover" ? 0.22 : 0.1);
+    ctx.fillRect(hx + inset, hy + inset, cell - inset * 2, cell - inset * 2);
+    ctx.strokeStyle = theme.cyan;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(hx + inset, hy + inset, cell - inset * 2, cell - inset * 2);
+    if (cell >= 18) {
+      const m = cell * 0.18;
+      ctx.beginPath();
+      ctx.moveTo(hx + cell / 2 - m, hy + cell / 2);
+      ctx.lineTo(hx + cell / 2 + m, hy + cell / 2);
+      ctx.moveTo(hx + cell / 2, hy + cell / 2 - m);
+      ctx.lineTo(hx + cell / 2, hy + cell / 2 + m);
+      ctx.stroke();
+    }
+    // Link rescuer → failed holder.
+    const a = interpolated(rescuer, progress);
+    const b = holder.position;
+    ctx.strokeStyle = withAlpha(theme.cyan, 0.75);
+    ctx.lineWidth = Math.max(1, cell * 0.05);
+    ctx.setLineDash([Math.max(2, cell * 0.08), Math.max(3, cell * 0.14)]);
+    ctx.beginPath();
+    ctx.moveTo(ox + (a.x + 0.5) * cell, oy + (a.y + 0.5) * cell);
+    ctx.lineTo(ox + (b.x + 0.5) * cell, oy + (b.y + 0.5) * cell);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+
+/** Route invalidated (amber "!"), replanned (lime "✓") or no route (red "×"), for a few ticks. */
+function drawRouteEventBadge(ctx: CanvasRenderingContext2D, theme: CanvasTheme, view: RenderView, robot: RobotState, progress: number, tick: number) {
+  const event = robot.routeEvent;
+  if (!event || view.cell < 14) return;
+  if (event.kind === "replanned" && tick - event.tick > 4) return;
+  const { cell, offsetX: ox, offsetY: oy } = view;
+  const p = interpolated(robot, progress);
+  const size = Math.max(8, cell * 0.72);
+  const r = Math.max(4, size * 0.2);
+  const cx = ox + (p.x + 0.5) * cell - size / 2;
+  const cy = oy + (p.y + 0.5) * cell + size / 2;
+  const color = event.kind === "invalidated" ? theme.amber : event.kind === "replanned" ? theme.lime : theme.red;
+  const glyph = event.kind === "invalidated" ? "!" : event.kind === "replanned" ? "✓" : "×";
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = theme.bg;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = theme.bg;
+  ctx.font = `700 ${Math.round(r * 1.4)}px ${theme.monoFont}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(glyph, cx, cy + 0.5);
+  ctx.restore();
+}
+
 /** Small diamond on robots working high / urgent missions. */
 function drawPriorityFlag(
   ctx: CanvasRenderingContext2D,
@@ -634,8 +712,11 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   ctx.roundRect(x, y, w, h, r);
 }
 
-function haloStyle(theme: CanvasTheme, robot: RobotState, faulted: boolean): { color: string; dashed: boolean; strong: boolean } | null {
+function haloStyle(theme: CanvasTheme, robot: RobotState, faulted: boolean, tick: number): { color: string; dashed: boolean; strong: boolean } | null {
   if (faulted) return { color: withAlpha(theme.red, 0.9), dashed: false, strong: false };
+  // Being restored after a failure.
+  if (robot.status === "recovering") return { color: theme.amber, dashed: true, strong: true };
+  if (robot.recoveryRole?.role === "rescuer") return { color: theme.cyan, dashed: true, strong: true };
   switch (robot.waitClass) {
     case "deadlock":
       return { color: theme.red, dashed: false, strong: true };
@@ -645,8 +726,13 @@ function haloStyle(theme: CanvasTheme, robot: RobotState, faulted: boolean): { c
       return { color: theme.cyan, dashed: false, strong: true };
     case "congestion":
       return { color: withAlpha(theme.amber, 0.95), dashed: true, strong: false };
-    default:
-      return robot.status === "waiting" ? { color: withAlpha(theme.amber, 0.6), dashed: true, strong: false } : null;
+    default: {
+      if (robot.status === "waiting") return { color: withAlpha(theme.amber, 0.6), dashed: true, strong: false };
+      // Back in service after a failure (shown for 30 ticks).
+      const f = robot.failure;
+      if (f?.status === "restored" && f.restoredTick !== null && tick - f.restoredTick <= 30) return { color: withAlpha(theme.lime, 0.85), dashed: false, strong: false };
+      return null;
+    }
   }
 }
 
@@ -657,6 +743,8 @@ function drawRobot(
   robot: RobotState,
   options: RenderOptions,
   selected: boolean,
+  tick: number,
+  stranded: boolean,
 ) {
   const { cell, offsetX: ox, offsetY: oy } = view;
   const p = interpolated(robot, options.progress);
@@ -672,7 +760,7 @@ function drawRobot(
   // Status halo for states that need attention. Deadlock classes take
   // precedence: red solid = deadlocked, red dashed = recovering,
   // cyan = yielding to a holding position, amber dashed = waiting/congestion.
-  const halo = haloStyle(theme, robot, faulted);
+  const halo = haloStyle(theme, robot, faulted, tick);
   if (halo) {
     ctx.strokeStyle = halo.color;
     ctx.lineWidth = Math.max(1.5, cell * (halo.strong ? 0.08 : 0.06));
@@ -703,15 +791,24 @@ function drawRobot(
   ctx.fill();
   ctx.restore();
 
-  // Package indicator
+  // Package indicator (red with "!" while the package needs recovery)
   if (robot.packageId) {
-    const ps = Math.max(3, size * 0.24);
-    ctx.fillStyle = theme.amber;
+    const ps = Math.max(3, size * (stranded ? 0.34 : 0.24));
+    const px = cx + half - ps * 0.75;
+    const py = cy - half - ps * 0.25;
+    ctx.fillStyle = stranded ? theme.red : theme.amber;
     ctx.strokeStyle = theme.bg;
     ctx.lineWidth = 1;
-    roundedRect(ctx, cx + half - ps * 0.75, cy - half - ps * 0.25, ps, ps, 1.5);
+    roundedRect(ctx, px, py, ps, ps, 1.5);
     ctx.fill();
     ctx.stroke();
+    if (stranded && ps >= 6) {
+      ctx.fillStyle = theme.text;
+      ctx.font = `700 ${Math.round(ps * 0.8)}px ${theme.monoFont}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", px + ps / 2, py + ps / 2 + 0.5);
+    }
   }
 
   if (selected) drawBrackets(ctx, theme.lime, cx - half - 3, cy - half - 3, size + 6);
