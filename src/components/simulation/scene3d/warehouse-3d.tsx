@@ -16,6 +16,7 @@ import { presetPose, CameraRig } from "./camera-rig";
 import { selectionSource, useCamera3D } from "./camera-store";
 import { Closures, Incidents, Reservations, Routes, Stations } from "./overlays";
 import { RobotFleet } from "./robot-fleet";
+import { LabelProjector, SceneLabels, type LabelElementMap } from "./scene-labels";
 import { WarehouseFloor } from "./warehouse-floor";
 import { WarehouseRacks } from "./warehouse-racks";
 
@@ -55,9 +56,11 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
+  const labelEls = useRef<LabelElementMap>(new Map());
   const [quality] = useState<Quality>(detectQuality);
   const [dpr, setDpr] = useState(() => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, MAX_DPR[quality]));
   const layout = useSimulationStore((s) => s.snapshot.layout);
+  const showLabels = usePreferencesValue("showLabels");
   const frame = useMemo(() => frameOf(layout), [layout]);
   const palette = useMemo(() => (typeof document === "undefined" ? ["#40c8e8"] : readCanvasTheme(document.documentElement).robots), []);
   const initial = useMemo(() => presetPose("isometric", frame), [frame]);
@@ -120,8 +123,9 @@ export default function Warehouse3D({ className }: { className?: string }) {
         <Lighting frame={frame} quality={quality} />
         <WarehouseFloor layout={layout} showGrid={usePreferencesValue("showGrid")} onSelectCell={onSelectCell} onHoverCell={onHoverCell} />
         <WarehouseRacks layout={layout} quality={quality} cutaway={cutaway} />
-        <Stations stations={layout.stations} frame={frame} showLabels={usePreferencesValue("showLabels")} />
+        <Stations stations={layout.stations} frame={frame} />
         <LiveLayers palette={palette} />
+        <LabelProjector showLabels={showLabels} labelEls={labelEls} />
         <OrbitControls
           makeDefault
           enableDamping
@@ -135,6 +139,8 @@ export default function Warehouse3D({ className }: { className?: string }) {
         <CameraRig frame={frame} />
         <FrameDriver statsRef={statsRef} />
       </Canvas>
+
+      <StudioSceneLabels palette={palette} showLabels={showLabels} labelEls={labelEls} />
 
       <div
         ref={readoutRef}
@@ -152,6 +158,29 @@ function usePreferencesValue(key: "showGrid" | "showLabels" | "showRoutes" | "sh
   return usePreferences((s) => s[key]);
 }
 
+function StudioSceneLabels({
+  palette,
+  showLabels,
+  labelEls,
+}: {
+  palette: readonly string[];
+  showLabels: boolean;
+  labelEls: React.RefObject<LabelElementMap>;
+}) {
+  const snapshot = useSimulationStore((s) => s.snapshot);
+  const selection = useSimulationStore((s) => s.selection);
+  const selectedRobotId = selection?.kind === "robot" ? selection.id : null;
+  return (
+    <SceneLabels
+      snapshot={snapshot}
+      palette={palette}
+      selectedRobotId={selectedRobotId}
+      showLabels={showLabels}
+      labelEls={labelEls}
+    />
+  );
+}
+
 /** Per-tick overlays: re-render once per engine tick (not per frame). */
 function LiveLayers({ palette }: { palette: readonly string[] }) {
   const snapshot: SimulationSnapshot = useSimulationStore((s) => s.snapshot);
@@ -159,17 +188,16 @@ function LiveLayers({ palette }: { palette: readonly string[] }) {
   const showRoutes = usePreferencesValue("showRoutes");
   const showReservations = usePreferencesValue("showReservations");
   const showWaitLinks = usePreferencesValue("showWaitLinks");
-  const showLabels = usePreferencesValue("showLabels");
   const selectedId = selection?.kind === "robot" ? selection.id : null;
   const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => invalidate(), [snapshot, selection, showRoutes, showReservations, showWaitLinks, showLabels, invalidate]);
+  useEffect(() => invalidate(), [snapshot, selection, showRoutes, showReservations, showWaitLinks, invalidate]);
   return (
     <group>
       <Closures snapshot={snapshot} />
       {showReservations ? <Reservations snapshot={snapshot} palette={palette} selectedId={selectedId} /> : null}
       {showRoutes ? <Routes snapshot={snapshot} palette={palette} selectedId={selectedId} /> : null}
       <Incidents snapshot={snapshot} showWaitLinks={showWaitLinks} />
-      <RobotFleet snapshot={snapshot} palette={palette} showLabels={showLabels} />
+      <RobotFleet snapshot={snapshot} palette={palette} />
     </group>
   );
 }

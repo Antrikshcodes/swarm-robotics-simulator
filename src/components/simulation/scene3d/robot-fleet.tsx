@@ -3,7 +3,6 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
 import type { RobotState, SimulationSnapshot } from "@/types/simulation";
 import { angleDelta, frameOf, gridToWorld, HEADING_YAW } from "@/lib/scene3d/grid-to-world";
 import { lerpGrid, tickProgress } from "@/lib/scene3d/interpolation";
@@ -51,12 +50,12 @@ function createShared() {
 }
 const getShared = () => (shared ??= createShared());
 
-export function RobotFleet({ snapshot, palette, showLabels }: { snapshot: SimulationSnapshot; palette: readonly string[]; showLabels: boolean }) {
+export function RobotFleet({ snapshot, palette }: { snapshot: SimulationSnapshot; palette: readonly string[] }) {
   const roster = useMemo(() => snapshot.robots.map((r) => ({ id: r.id, colorIndex: r.colorIndex })), [snapshot.scenarioId]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <group>
       {roster.map((r) => (
-        <Robot3D key={`${snapshot.scenarioId}:${r.id}`} id={r.id} accent={palette[(r.colorIndex - 1 + palette.length) % palette.length]} showLabels={showLabels} />
+        <Robot3D key={`${snapshot.scenarioId}:${r.id}`} id={r.id} accent={palette[(r.colorIndex - 1 + palette.length) % palette.length]} />
       ))}
     </group>
   );
@@ -68,7 +67,7 @@ export function RobotFleet({ snapshot, palette, showLabels }: { snapshot: Simula
  * of it is applied imperatively in useFrame, so React does not re-render
  * per frame or per tick.
  */
-const Robot3D = memo(function Robot3D({ id, accent, showLabels }: { id: string; accent: string; showLabels: boolean }) {
+const Robot3D = memo(function Robot3D({ id, accent }: { id: string; accent: string }) {
   const g = getShared();
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
@@ -76,12 +75,10 @@ const Robot3D = memo(function Robot3D({ id, accent, showLabels }: { id: string; 
   const wheels = useRef<THREE.Mesh[]>([]);
   const cargo = useRef<THREE.Mesh>(null);
   const ring = useRef<THREE.Mesh>(null);
-  const label = useRef<HTMLDivElement>(null);
   const state = useRef({ yaw: NaN, key: "" });
-  // Any re-render (e.g. labels toggled) re-applies the state visuals on the next frame.
-  useEffect(() => {
-    state.current.key = "";
-  });
+  useEffect(() => () => {
+    robotPoses.delete(id);
+  }, [id]);
 
   const accentMat = useMemo(() => new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.35, roughness: 0.4 }), [accent]);
   const statusMat = useMemo(() => new THREE.MeshBasicMaterial({ color: "#5f8a96", toneMapped: false }), []);
@@ -130,11 +127,6 @@ const Robot3D = memo(function Robot3D({ id, accent, showLabels }: { id: string; 
       if (ring.current) {
         ring.current.visible = ringColor !== null;
         if (ringColor) ringMat.color.set(ringColor);
-      }
-      if (label.current) {
-        label.current.dataset.state = robot.status === "failed" ? "failed" : robot.waitClass === "deadlock" ? "deadlock" : robot.status === "waiting" ? "waiting" : selected ? "selected" : "";
-        const tag = label.current.querySelector("[data-tag]");
-        if (tag) tag.textContent = robot.status === "failed" ? "FAILED" : robot.status === "recovering" ? "RESTORING" : robot.waitClass === "deadlock" ? "DEADLOCK" : robot.status === "waiting" ? "WAIT" : "";
       }
     }
     // Pulse the ring for waiting / failed robots.
@@ -197,18 +189,6 @@ const Robot3D = memo(function Robot3D({ id, accent, showLabels }: { id: string; 
         {/* Carried package */}
         <mesh ref={cargo} geometry={g.cargo} material={cargoMat} position={[0, 0.465, -0.08]} visible={false} castShadow />
       </group>
-      {showLabels ? (
-        <Html position={[0, 0.95, 0]} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-          <div
-            ref={label}
-            className="flex items-center gap-1 rounded-sm border border-white/15 bg-[#0b1013]/85 px-1.5 py-0.5 font-mono text-[11px] font-semibold whitespace-nowrap text-[#f2f4f3] data-[state=deadlock]:border-[#f06464] data-[state=failed]:border-[#f06464] data-[state=selected]:border-[#b7f34a] data-[state=waiting]:border-[#f5b942]"
-          >
-            <span className="size-1.5 rounded-full" style={{ backgroundColor: accent }} />
-            {id}
-            <span data-tag className="text-[9.5px] text-[#f5b942] empty:hidden" />
-          </div>
-        </Html>
-      ) : null}
     </group>
   );
 });

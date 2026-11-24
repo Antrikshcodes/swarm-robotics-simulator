@@ -3,10 +3,11 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
-import { Html, Line } from "@react-three/drei";
+import { Line } from "@react-three/drei";
 import type { Line2 } from "three-stdlib";
 import type { GridPoint, SimulationSnapshot, Station } from "@/types/simulation";
 import { frameOf, gridToWorld, type GridFrame } from "@/lib/scene3d/grid-to-world";
+import { stationColorForKind } from "@/lib/scene3d/projection";
 import { robotPoses } from "./robot-fleet";
 
 /**
@@ -25,12 +26,12 @@ const toVec = (frame: GridFrame, p: GridPoint, y: number): [number, number, numb
 
 // ------------------------------------------------------------------ stations
 
-export function Stations({ stations, frame, showLabels }: { stations: readonly Station[]; frame: GridFrame; showLabels: boolean }) {
+export function Stations({ stations, frame }: { stations: readonly Station[]; frame: GridFrame }) {
   return (
     <group>
       {stations.map((s) => {
         const w = gridToWorld(frame, s.position.x, s.position.y);
-        const color = s.kind === "pickup" ? "#40c8e8" : s.kind === "dropoff" ? "#b7f34a" : "#c8d2d8";
+        const color = stationColorForKind(s.kind);
         return (
           <group key={s.id} position={[w.x, 0, w.z]}>
             {/* Marker post in the pad corner (robots dock on the pad itself). */}
@@ -47,13 +48,6 @@ export function Stations({ stations, frame, showLabels }: { stations: readonly S
                 <boxGeometry args={[0.5, 0.4, 0.08]} />
                 <meshStandardMaterial color="#2c3438" metalness={0.5} roughness={0.5} />
               </mesh>
-            ) : null}
-            {showLabels ? (
-              <Html position={[-0.42, 1.38, -0.42]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-                <div className="rounded-sm bg-[#0b1013]/80 px-1 font-mono text-[10px] font-semibold whitespace-nowrap" style={{ color }}>
-                  {s.id}
-                </div>
-              </Html>
             ) : null}
           </group>
         );
