@@ -16,7 +16,7 @@ import { presetPose, CameraRig } from "./camera-rig";
 import { selectionSource, useCamera3D } from "./camera-store";
 import { Closures, Incidents, Reservations, Routes, Stations } from "./overlays";
 import { RobotFleet } from "./robot-fleet";
-import { LabelProjector, SceneLabels, type LabelElementMap } from "./scene-labels";
+import { SceneLabels } from "./scene-labels";
 import { WarehouseFloor } from "./warehouse-floor";
 import { WarehouseRacks } from "./warehouse-racks";
 
@@ -56,11 +56,10 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
-  const labelEls = useRef<LabelElementMap>(new Map());
+  const labelLayerRef = useRef<HTMLDivElement>(null);
   const [quality] = useState<Quality>(detectQuality);
   const [dpr, setDpr] = useState(() => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, MAX_DPR[quality]));
   const layout = useSimulationStore((s) => s.snapshot.layout);
-  const showLabels = usePreferencesValue("showLabels");
   const frame = useMemo(() => frameOf(layout), [layout]);
   const palette = useMemo(() => (typeof document === "undefined" ? ["#40c8e8"] : readCanvasTheme(document.documentElement).robots), []);
   const initial = useMemo(() => presetPose("isometric", frame), [frame]);
@@ -68,9 +67,14 @@ export default function Warehouse3D({ className }: { className?: string }) {
   const cutawayPref = usePreferences((s) => s.rackCutaway);
   const cutaway = cutawayPref || isCorridorLayout(layout);
 
-  // Reset to the default view whenever a different scenario (layout) loads.
+  // On a new layout, return to the default view — unless a robot is being
+  // followed / chased (e.g. "Focus in 3D Studio" from the Fleet page) and still exists.
   useEffect(() => {
-    useCamera3D.getState().setPreset("isometric", null);
+    const { preset, robotId } = useCamera3D.getState();
+    const tracking = (preset === "follow" || preset === "chase") && robotId !== null;
+    const exists = tracking && useSimulationStore.getState().snapshot.robots.some((r) => r.id === robotId);
+    if (exists) useCamera3D.getState().setPreset(preset, robotId);
+    else useCamera3D.getState().setPreset("isometric", null);
   }, [layout]);
 
   const onHoverCell = (cell: GridPoint | null) => {
@@ -125,7 +129,6 @@ export default function Warehouse3D({ className }: { className?: string }) {
         <WarehouseRacks layout={layout} quality={quality} cutaway={cutaway} />
         <Stations stations={layout.stations} frame={frame} />
         <LiveLayers palette={palette} />
-        <LabelProjector showLabels={showLabels} labelEls={labelEls} />
         <OrbitControls
           makeDefault
           enableDamping
@@ -138,9 +141,9 @@ export default function Warehouse3D({ className }: { className?: string }) {
         />
         <CameraRig frame={frame} />
         <FrameDriver statsRef={statsRef} />
+        <SceneLabels layer={labelLayerRef} />
       </Canvas>
-
-      <StudioSceneLabels palette={palette} showLabels={showLabels} labelEls={labelEls} />
+      <div ref={labelLayerRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" />
 
       <div
         ref={readoutRef}
@@ -158,29 +161,6 @@ function usePreferencesValue(key: "showGrid" | "showLabels" | "showRoutes" | "sh
   return usePreferences((s) => s[key]);
 }
 
-function StudioSceneLabels({
-  palette,
-  showLabels,
-  labelEls,
-}: {
-  palette: readonly string[];
-  showLabels: boolean;
-  labelEls: React.RefObject<LabelElementMap>;
-}) {
-  const snapshot = useSimulationStore((s) => s.snapshot);
-  const selection = useSimulationStore((s) => s.selection);
-  const selectedRobotId = selection?.kind === "robot" ? selection.id : null;
-  return (
-    <SceneLabels
-      snapshot={snapshot}
-      palette={palette}
-      selectedRobotId={selectedRobotId}
-      showLabels={showLabels}
-      labelEls={labelEls}
-    />
-  );
-}
-
 /** Per-tick overlays: re-render once per engine tick (not per frame). */
 function LiveLayers({ palette }: { palette: readonly string[] }) {
   const snapshot: SimulationSnapshot = useSimulationStore((s) => s.snapshot);
@@ -188,9 +168,10 @@ function LiveLayers({ palette }: { palette: readonly string[] }) {
   const showRoutes = usePreferencesValue("showRoutes");
   const showReservations = usePreferencesValue("showReservations");
   const showWaitLinks = usePreferencesValue("showWaitLinks");
+  const showLabels = usePreferencesValue("showLabels");
   const selectedId = selection?.kind === "robot" ? selection.id : null;
   const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => invalidate(), [snapshot, selection, showRoutes, showReservations, showWaitLinks, invalidate]);
+  useEffect(() => invalidate(), [snapshot, selection, showRoutes, showReservations, showWaitLinks, showLabels, invalidate]);
   return (
     <group>
       <Closures snapshot={snapshot} />

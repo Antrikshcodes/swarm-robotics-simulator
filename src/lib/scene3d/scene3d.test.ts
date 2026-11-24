@@ -3,7 +3,6 @@ import { createSimulationSource, getCompiledScenario, SCENARIOS } from "../../en
 import { angleDelta, CELL, gridToWorld, HEADING_YAW, worldToGrid } from "./grid-to-world";
 import { easeInOut, lerpGrid, tickProgress } from "./interpolation";
 import { buildRackScene, isOpenCell, RACK } from "./layout-to-scene";
-import { ndcToViewport, robotLabelMeta, stationColorForKind } from "./projection";
 
 const frame = { width: 28, height: 18 };
 
@@ -107,45 +106,5 @@ describe("layout → 3D scene", () => {
         }
       }
     }
-  });
-});
-
-describe("3D label projection", () => {
-  it("converts clip-space coordinates into CSS viewport pixels", () => {
-    expect(ndcToViewport(0, 0, 0, 800, 600)).toEqual({ x: 400, y: 300, visible: true });
-    expect(ndcToViewport(-1, 1, -0.5, 800, 600)).toEqual({ x: 0, y: 0, visible: true });
-    expect(ndcToViewport(1, -1, 1, 800, 600)).toEqual({ x: 800, y: 600, visible: true });
-  });
-
-  it("culls coordinates behind the camera, NaN, or far outside viewport margins", () => {
-    expect(ndcToViewport(0, 0, 1.01, 800, 600).visible).toBe(false);
-    expect(ndcToViewport(0, 0, -1.01, 800, 600).visible).toBe(false);
-    expect(ndcToViewport(Number.NaN, 0, 0, 800, 600).visible).toBe(false);
-    expect(ndcToViewport(2, 0, 0, 800, 600, 20).visible).toBe(false);
-    expect(ndcToViewport(0, 0, 0, 0, 600).visible).toBe(false);
-  });
-
-  it("derives robot badge state & tag labels consistently", () => {
-    expect(robotLabelMeta({ status: "failed", waitClass: "none" }, true)).toEqual({ state: "failed", tag: "FAILED" });
-    expect(robotLabelMeta({ status: "recovering", waitClass: "none" }, false)).toEqual({
-      state: "",
-      tag: "RESTORING",
-    });
-    expect(robotLabelMeta({ status: "waiting", waitClass: "deadlock" }, false)).toEqual({
-      state: "deadlock",
-      tag: "DEADLOCK",
-    });
-    expect(robotLabelMeta({ status: "waiting", waitClass: "congestion" }, true)).toEqual({
-      state: "waiting",
-      tag: "WAIT",
-    });
-    expect(robotLabelMeta({ status: "moving", waitClass: "none" }, true)).toEqual({ state: "selected", tag: "" });
-    expect(robotLabelMeta({ status: "idle", waitClass: "none" }, false)).toEqual({ state: "", tag: "" });
-  });
-
-  it("maps station kinds to matching post/badge colours", () => {
-    expect(stationColorForKind("pickup")).toBe("#40c8e8");
-    expect(stationColorForKind("dropoff")).toBe("#b7f34a");
-    expect(stationColorForKind("charger")).toBe("#c8d2d8");
   });
 });

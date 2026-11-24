@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowUp, Crosshair, Package } from "lucide-react";
-import type { RobotStatus } from "@/types/simulation";
+import { FLEET_FILTERS, fleetSummary, type FleetFilter } from "@/lib/fleet";
+import { cn } from "@/lib/utils";
 import { PageContainer, PageIntro } from "@/components/layout/page-container";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { DataSourceBadge } from "@/components/ui/data-source-badge";
@@ -12,6 +14,9 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, Td, Th, THead, Tr } from "@/components/ui/data-table";
 import { IconButton } from "@/components/ui/icon-button";
 import { PlannedNote } from "@/components/ui/planned-note";
+import { Stat } from "@/components/ui/stat";
+import { usePreferences } from "@/store/preferences-store";
+import { useCamera3D } from "@/components/simulation/scene3d/camera-store";
 import { useSimulationStore } from "@/store/simulation-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { cellRef, formatPercent, formatTick, HEADING_DEGREES, HEADING_LABEL } from "@/lib/format";
@@ -20,14 +25,25 @@ import { robotUtilisation } from "@/lib/selectors";
 import { RobotChip } from "./robot-chip";
 import { BatteryMeter } from "./battery-meter";
 
-type Filter = "all" | "working" | "waiting" | "idle" | "failed";
+// Face cards render live 3D portraits (Three.js): load on the client only.
+const FleetFaceGrid = dynamic(() => import("./fleet-face-grid"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-64 items-center justify-center rounded-lg border border-white/[0.08] bg-[#121A1E] font-mono text-[11px] tracking-[0.16em] text-[#5d6b71] uppercase">
+      Loading fleet portraits…
+    </div>
+  ),
+});
 
-const MATCH: Record<Filter, (s: RobotStatus) => boolean> = {
-  all: () => true,
-  working: (s) => s === "moving" || s === "carrying" || s === "loading" || s === "unloading",
-  waiting: (s) => s === "waiting",
-  idle: (s) => s === "idle" || s === "charging",
-  failed: (s) => s === "failed" || s === "recovering",
+type FleetView = "cards" | "table";
+
+const FILTER_LABELS: Record<FleetFilter, string> = {
+  all: "All",
+  active: "Active",
+  idle: "Idle",
+  waiting: "Waiting",
+  blocked: "Blocked",
+  failed: "Failed",
 };
 
 export function FleetRoster() {
@@ -35,17 +51,29 @@ export function FleetRoster() {
   const selection = useSimulationStore((s) => s.selection);
   const select = useSimulationStore((s) => s.select);
   const router = useRouter();
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<FleetFilter>("all");
+  const [view, setView] = useState<FleetView>("cards");
 
-  const robots = snapshot.robots.filter((r) => MATCH[filter](r.status));
-  const count = (f: Filter) => snapshot.robots.filter((r) => MATCH[f](r.status)).length;
+  const robots = snapshot.robots.filter(FLEET_FILTERS[filter]);
+  const count = (f: FleetFilter) => snapshot.robots.filter(FLEET_FILTERS[f]).length;
+  const summary = fleetSummary(snapshot.robots);
 
   const inspect = (id: string) => {
     const robot = snapshot.robots.find((r) => r.id === id);
     select({ kind: "robot", id });
     if (robot) useViewportStore.getState().centerOn(robot.position.x, robot.position.y);
+    if (usePreferences.getState().studioView === "3d") useCamera3D.getState().setPreset("follow", id);
     router.push("/simulation");
   };
+
+  const filterTabs = (
+    <FilterTabs
+      label="Filter robots by status"
+      value={filter}
+      onChange={setFilter}
+      options={(Object.keys(FILTER_LABELS) as FleetFilter[]).map((f) => ({ value: f, label: FILTER_LABELS[f], count: count(f) }))}
+    />
+  );
 
   return (
     <PageContainer>
@@ -56,24 +84,49 @@ export function FleetRoster() {
         <DataSourceBadge />
       </PageIntro>
 
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Panel className="p-4">
+          <Stat label="Total robots" value={summary.total} />
+        </Panel>
+        <Panel className="p-4">
+          <Stat label="Active" value={summary.active} tone={summary.active ? "lime" : undefined} hint="Moving, carrying or handling" />
+        </Panel>
+        <Panel className="p-4">
+          <Stat label="Idle" value={summary.idle} hint="Parked or charging" />
+        </Panel>
+        <Panel className="p-4">
+          <Stat label="Needs attention" value={summary.attention} tone={summary.attention ? "red" : undefined} hint="Failed, blocked or deadlocked" />
+        </Panel>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {filterTabs}
+        <div role="radiogroup" aria-label="Fleet view" className="flex h-8 items-center rounded-md border border-line p-0.5 font-mono text-[10.5px] tracking-[0.12em] uppercase">
+          {(["cards", "table"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={view === v}
+              onClick={() => setView(v)}
+              className={cn(
+                "h-7 rounded px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                view === v ? "bg-white/[0.08] text-foreground" : "text-text-secondary hover:text-foreground",
+              )}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view === "cards" ? <FleetFaceGrid filter={filter} /> : null}
+
+      {view === "table" ? (
       <Panel>
         <PanelHeader
           title="Robot roster"
           description="Live state from the current scenario. Select a row to highlight the robot in Simulation Studio."
-          actions={
-            <FilterTabs
-              label="Filter robots by status"
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: "all", label: "All", count: count("all") },
-                { value: "working", label: "Working", count: count("working") },
-                { value: "waiting", label: "Waiting", count: count("waiting") },
-                { value: "idle", label: "Idle", count: count("idle") },
-                { value: "failed", label: "Failed", count: count("failed") },
-              ]}
-            />
-          }
         />
         <Table className="min-w-[1240px]">
           <THead>
@@ -165,11 +218,12 @@ export function FleetRoster() {
           </tbody>
         </Table>
       </Panel>
+      ) : null}
 
       <PlannedNote mission="Mission 005">
-        Fail a robot with a chosen failure type and restore it from the Simulation Studio inspector. Packages stranded
-        on a failed robot are taken over by the nearest free robot through an atomic custody handover. Battery uses a
-        simplified drain / charge model.
+        Portraits use the same 3D robot model as the Simulation Studio. Mode and connectivity are derived from engine
+        state (a robot halted by a communication failure shows Link lost). Fail or restore robots from the Simulation
+        Studio inspector. Battery uses a simplified drain / charge model.
       </PlannedNote>
     </PageContainer>
   );
