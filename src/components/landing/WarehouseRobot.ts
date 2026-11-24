@@ -9,6 +9,8 @@ export interface RobotUpdateParams {
   pointer: { x: number; y: number };
   expression?: RobotExpression;
   lidarSpeedMultiplier?: number;
+  /** Idle motion (bobbing, LiDAR spin, blinking). Off for reduced motion. */
+  animate?: boolean;
 }
 
 export class WarehouseRobot {
@@ -16,7 +18,14 @@ export class WarehouseRobot {
   private chassisGroup: THREE.Group;
   private wheels: THREE.Mesh[] = [];
   private lidarTurret!: THREE.Group;
+  private lidarHead!: THREE.Group;
   private lidarBeam!: THREE.Mesh;
+  /** World-space anchor at the LiDAR head, for HUD labels. */
+  public readonly lidarAnchor = new THREE.Object3D();
+  /** Pre-rendered display background (grid), drawn once. */
+  private faceBackground: HTMLCanvasElement;
+  /** Last drawn face state; the texture is only redrawn and re-uploaded when it changes. */
+  private faceKey = "";
   private eyeCanvas: HTMLCanvasElement;
   private eyeContext: CanvasRenderingContext2D;
   private eyeTexture: THREE.CanvasTexture;
@@ -43,6 +52,7 @@ export class WarehouseRobot {
     this.eyeCanvas.width = 512;
     this.eyeCanvas.height = 256;
     this.eyeContext = this.eyeCanvas.getContext("2d")!;
+    this.faceBackground = this.renderFaceBackground();
     this.eyeTexture = new THREE.CanvasTexture(this.eyeCanvas);
     this.eyeTexture.colorSpace = THREE.SRGBColorSpace;
     this.eyeMaterial = new THREE.MeshBasicMaterial({
@@ -225,6 +235,9 @@ export class WarehouseRobot {
     const headGroup = new THREE.Group();
     headGroup.name = "rotatingHead";
     headGroup.position.y = 0.12;
+    this.lidarHead = headGroup;
+    this.lidarAnchor.position.set(0, 0.14, 0);
+    this.lidarTurret.add(this.lidarAnchor);
 
     const headGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.12, 24);
     const headMat = new THREE.MeshStandardMaterial({
@@ -244,17 +257,18 @@ export class WarehouseRobot {
     headGroup.add(slot);
 
     // Scanning fan beam (translucent)
-    const beamGeo = new THREE.ConeGeometry(1.6, 0.05, 32, 1, true, 0, Math.PI / 3);
+    // Short fan so the scan stays around the robot and never sweeps into the text column.
+    const beamGeo = new THREE.ConeGeometry(0.95, 0.05, 32, 1, true, 0, Math.PI / 3);
     beamGeo.rotateX(Math.PI / 2);
     const beamMat = new THREE.MeshBasicMaterial({
       color: 0x40c8e8,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.16,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     this.lidarBeam = new THREE.Mesh(beamGeo, beamMat);
-    this.lidarBeam.position.set(0, 0, 0.8);
+    this.lidarBeam.position.set(0, 0, 0.48);
     headGroup.add(this.lidarBeam);
 
     this.lidarTurret.add(headGroup);
@@ -344,30 +358,34 @@ export class WarehouseRobot {
     this.chassisGroup.add(band);
   }
 
-  private drawEyes(offsetX: number, offsetY: number, eyeOpen: number, expression: RobotExpression) {
+  private renderFaceBackground(): HTMLCanvasElement {
+    const bg = document.createElement("canvas");
+    bg.width = this.eyeCanvas.width;
+    bg.height = this.eyeCanvas.height;
+    const ctx = bg.getContext("2d")!;
+    ctx.fillStyle = "#0c1013";
+    ctx.fillRect(0, 0, bg.width, bg.height);
+    ctx.strokeStyle = "rgba(64, 200, 232, 0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < bg.width; x += 32) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, bg.height);
+    }
+    for (let y = 0; y < bg.height; y += 32) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(bg.width, y);
+    }
+    ctx.stroke();
+    return bg;
+  }
+
+  private drawEyes(offsetX: number, offsetY: number, eyeOpen: number, expression: RobotExpression, scanY = 0) {
     const ctx = this.eyeContext;
     const w = this.eyeCanvas.width;
     const h = this.eyeCanvas.height;
 
-    // Clear background to deep glossy black
-    ctx.fillStyle = "#0c1013";
-    ctx.fillRect(0, 0, w, h);
-
-    // Subtle technical grid pattern on display
-    ctx.strokeStyle = "rgba(64, 200, 232, 0.06)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x < w; x += 32) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    }
-    for (let y = 0; y < h; y += 32) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
+    ctx.drawImage(this.faceBackground, 0, 0);
 
     const eyeWidth = 56;
     const eyeHeight = 90 * Math.max(0.08, eyeOpen);
@@ -419,7 +437,6 @@ export class WarehouseRobot {
 
     // Scanning line effect when in scanning mode
     if (expression === "scanning") {
-      const scanY = (Date.now() / 15) % h;
       ctx.strokeStyle = "rgba(64, 200, 232, 0.8)";
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -433,36 +450,33 @@ export class WarehouseRobot {
   }
 
   public update(params: RobotUpdateParams) {
-    const { time, delta, scrollProgress, pointer, expression = "neutral", lidarSpeedMultiplier = 1 } = params;
+    const { time, delta, scrollProgress, pointer, expression = "neutral", lidarSpeedMultiplier = 1, animate = true } = params;
+    // Frame-rate independent smoothing.
+    const follow = 1 - Math.exp(-delta * 6);
 
-    // 1. Idle Suspension Bobbing & Breathing
-    this.idleBobOffset = Math.sin(time * 2.2) * 0.022;
+    // 1. Idle suspension bobbing
+    this.idleBobOffset = animate ? Math.sin(time * 2.2) * 0.018 : 0;
     this.chassisGroup.position.y = this.idleBobOffset;
 
-    // 2. Chassis tilt and yaw toward pointer
-    const targetChassisYaw = pointer.x * 0.28;
-    const targetChassisPitch = -pointer.y * 0.12;
-    this.chassisGroup.rotation.y += (targetChassisYaw - this.chassisGroup.rotation.y) * 0.08;
-    this.chassisGroup.rotation.x += (targetChassisPitch - this.chassisGroup.rotation.x) * 0.08;
+    // 2. Gentle chassis yaw / pitch toward the pointer
+    const targetChassisYaw = pointer.x * 0.22;
+    const targetChassisPitch = -pointer.y * 0.06;
+    this.chassisGroup.rotation.y += (targetChassisYaw - this.chassisGroup.rotation.y) * follow;
+    this.chassisGroup.rotation.x += (targetChassisPitch - this.chassisGroup.rotation.x) * follow;
 
-    // 3. Rotating LiDAR
-    const head = this.lidarTurret.getObjectByName("rotatingHead");
-    if (head) {
-      const lidarSpeed = (2.2 + scrollProgress * 1.5) * lidarSpeedMultiplier;
-      head.rotation.y += delta * lidarSpeed;
+    if (animate) {
+      // 3. Rotating LiDAR
+      this.lidarHead.rotation.y += delta * (2.2 + scrollProgress * 1.5) * lidarSpeedMultiplier;
+      // 4. Idle wheel hum
+      const wheelSpin = delta * (0.8 + scrollProgress * 2.0);
+      for (const wheel of this.wheels) wheel.rotation.x += wheelSpin;
     }
 
-    // 4. Subtle wheel spin matching movement / idle hum
-    const wheelSpin = delta * (0.8 + scrollProgress * 2.0);
-    this.wheels.forEach((wheel) => {
-      wheel.rotation.x += wheelSpin;
-    });
+    // 5. Blinking and eye tracking
+    this.lookX += (pointer.x - this.lookX) * follow;
+    this.lookY += (-pointer.y - this.lookY) * follow;
 
-    // 5. Blinking and Eye Tracking
-    this.lookX += (pointer.x - this.lookX) * 0.1;
-    this.lookY += (-pointer.y - this.lookY) * 0.1;
-
-    if (time > this.nextBlinkTime) {
+    if (animate && time > this.nextBlinkTime) {
       this.isBlinking = true;
       this.blinkProgress = 0;
       this.nextBlinkTime = time + 3.2 + Math.random() * 2.5;
@@ -479,9 +493,14 @@ export class WarehouseRobot {
       }
     }
 
-    // Draw updated eyes
+    // Redraw (and re-upload) the display only when what it shows changes.
     this.currentExpression = expression;
-    this.drawEyes(this.lookX, this.lookY, eyeOpen, expression);
+    const scanY = expression === "scanning" && animate ? Math.floor(((time * 1000) / 15) % this.eyeCanvas.height / 4) * 4 : 0;
+    const key = `${expression}|${Math.round(this.lookX * 40)}|${Math.round(this.lookY * 40)}|${Math.round(eyeOpen * 20)}|${scanY}`;
+    if (key !== this.faceKey) {
+      this.faceKey = key;
+      this.drawEyes(Math.round(this.lookX * 40) / 40, Math.round(this.lookY * 40) / 40, eyeOpen, expression, scanY);
+    }
   }
 
   public dispose() {
