@@ -24,7 +24,7 @@ The Simulation Studio is driven by a **deterministic, command-driven engine** wi
 | Fleet `/fleet` | Status-filtered robot roster, inspect-in-studio |
 | Missions `/missions` | Lifecycle KPIs, **new-mission form**, state-filtered log with custody column and **cancel** |
 | Incidents `/incidents` | Derived incident queue (deadlocks, robot failures, blocked / no-route robots, low battery, closures), locate, replay-from-tick, reopen closure, restore robot; **deadlock detail** and **failure detail** (lifecycle, failure record, recovery decisions, custody trail, event sequence) |
-| Analytics `/analytics` | Time and robot filters, mission status filter, throughput, delivery time, mission lifecycle, utilization, waiting, distance, movement-density heatmap, deadlock/recovery counters, per-robot comparison, event timeline |
+| Analytics `/analytics` | Time and robot filters, mission status filter, throughput, delivery time, mission lifecycle, utilization, waiting, distance, movement-density heatmap, deadlock/recovery counters, per-robot comparison, event timeline, **explainable per-robot timeline**, **cross-scenario run comparison archive**, and **JSON run-report export** |
 | Settings `/settings` | Tick duration, motion smoothing, canvas overlays, compact sidebar, shortcut reference |
 
 Three scenarios ship: **Standard warehouse** (5 robots, seeded feed with high/urgent missions), **Narrow aisle** (opposing missions compete for a one-cell passage; robots reserve it in turn or take a bypass), and **High-density warehouse** (8 robots, heavy feed, R-07 failed on a dock at tick 40 — its station's missions are held and requeued).
@@ -83,7 +83,8 @@ All six runs use the same simulation engine as the Studio. Scenarios are determi
 | `npm run build` / `npm start` | Production build / serve |
 | `npm run lint` | ESLint (Next.js core-web-vitals + TypeScript rules) |
 | `npm run typecheck` | Generate route types, then `tsc --noEmit` (strict) |
-| `npm test` | Vitest engine tests (A*, reservations, space-time planner, coordinator, custody, lifecycles, engine behaviour, invariants) |
+| `npm test` | Vitest engine, library, and store tests (243+ tests across 29+ files) |
+| `npm run e2e` | Playwright Chromium end-to-end verification across desktop and mobile routes |
 | `npm run bench` | Coordination scaling benchmark (4–32 robots) |
 | `npm run check` | lint + typecheck + tests |
 
