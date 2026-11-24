@@ -13,6 +13,8 @@ import { formatPercent, formatTick } from "@/lib/format";
 import type { SimulationSnapshot } from "@/types/simulation";
 import { ThroughputChart } from "./throughput-chart";
 import { allocation, TimeAllocation } from "./time-allocation";
+import { RobotTimelinePanel } from "./robot-timeline-panel";
+import { RunArchivePanel } from "./run-archive-panel";
 
 const RANGES: { label: string; value: AnalyticsRange }[] = [
   { label: "Last 100 ticks", value: 100 },
@@ -40,6 +42,9 @@ function MissionStatus({ state }: { state: string }) {
 export function AnalyticsDashboard() {
   const snapshot = useSimulationStore((state) => state.snapshot);
   const scenarioId = useSimulationStore((state) => state.scenarioId);
+  const runArchive = useSimulationStore((state) => state.runArchive);
+  const archiveCurrentRun = useSimulationStore((state) => state.archiveCurrentRun);
+  const clearRunArchive = useSimulationStore((state) => state.clearRunArchive);
   const [range, setRange] = useState<AnalyticsRange>("all");
   const [robotId, setRobotId] = useState("all");
   const [missionStatus, setMissionStatus] = useState<MissionFilter>("all");
@@ -165,6 +170,19 @@ export function AnalyticsDashboard() {
         <PanelHeader title="Mission analysis" description={`${visibleMissions.length} missions · status filter applies to this table`} />
         <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-xs"><thead className="border-b border-line text-[10px] uppercase tracking-wide text-text-dim"><tr><th className="px-4 py-2.5">Mission</th><th className="px-4 py-2.5">Robot</th><th className="px-4 py-2.5">Priority</th><th className="px-4 py-2.5">State</th><th className="px-4 py-2.5 text-right">Cycle</th></tr></thead><tbody>{visibleMissions.slice(-12).reverse().map((mission) => <tr key={mission.id} className="border-b border-line/60 last:border-0"><td className="px-4 py-3 font-mono">{mission.id}</td><td className="px-4 py-3 font-mono text-text-secondary">{mission.robotId ?? "—"}</td><td className="px-4 py-3 uppercase text-text-secondary">{mission.priority}</td><td className="px-4 py-3"><MissionStatus state={mission.state} /></td><td className="tabular px-4 py-3 text-right font-mono">{mission.completedTick === null ? "—" : `${mission.completedTick - mission.createdTick}t`}</td></tr>)}</tbody></table></div>
       </Panel>
+
+      <RobotTimelinePanel
+        snapshot={snapshot}
+        selectedRobotId={robotId}
+        onSelectRobot={setRobotId}
+      />
+
+      <RunArchivePanel
+        snapshot={snapshot}
+        archive={runArchive}
+        onArchiveCurrent={archiveCurrentRun}
+        onClearArchive={clearRunArchive}
+      />
     </PageContainer>
   );
 }
