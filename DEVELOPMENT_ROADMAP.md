@@ -4,29 +4,34 @@
 
 - [x] Create public GitHub repository.
 - [x] Add project source-of-truth documentation.
-- [ ] Clone repository locally and verify default branch.
-- [ ] Establish contribution and branch workflow.
+- [x] Clone repository locally and verify default branch.
+- [x] Establish contribution and branch workflow (feature branch per mission, independent review before merge).
 
 ## Mission 001 — Frontend foundation
 
-- [ ] Inspect existing repository and preserve all files.
-- [ ] Scaffold Next.js App Router with TypeScript and Tailwind.
-- [ ] Configure design tokens, Geist fonts, and shared UI primitives.
-- [ ] Build application shell: sidebar, top bar, status indicators.
-- [ ] Build Overview page foundation.
-- [ ] Build Simulation Studio layout foundation with canvas placeholder/grid rendering only.
-- [ ] Add route placeholders for Fleet, Missions, Incidents, Analytics, Settings.
-- [ ] Add documentation updates and run lint/typecheck/build.
+Status: implementation complete on `feat/mission-001-frontend`, awaiting independent review (see TASK_BOARD.md).
 
-**Out of scope:** advanced pathfinding, backend, real-time network layer, persistence, and final simulation algorithms.
+- [x] Inspect existing repository and preserve all files.
+- [x] Scaffold Next.js App Router with TypeScript and Tailwind.
+- [x] Configure design tokens, Geist fonts, and shared UI primitives.
+- [x] Build application shell: sidebar, top bar, status indicators.
+- [x] Build Overview page foundation.
+- [x] Build Simulation Studio layout foundation. *Delivered beyond the original "grid rendering only" scope: full Canvas warehouse, interactions and playback, driven by a deterministic scripted demo.*
+- [x] Add pages for Fleet, Missions, Incidents, Analytics, Settings (real content from the demo snapshot, not empty placeholders).
+- [x] Add documentation updates and run lint/typecheck/build.
+- [ ] Independent review (Codex) and resolution of findings.
+
+**Out of scope (still):** pathfinding, coordination, backend, real-time network layer, persistence, and final simulation algorithms.
 
 ## Mission 002 — World model and visual simulator
 
-- [ ] Define typed warehouse, station, obstacle, robot, and mission models.
-- [ ] Implement deterministic discrete-tick simulation loop.
-- [ ] Render grid, stations, obstacles, and robots on Canvas.
-- [ ] Add pan, zoom, selection, and entity inspector.
-- [ ] Add scenario loading and simulation playback controls.
+Groundwork from Mission 001: typed snapshot contract, ASCII layouts, a deterministic tick loop (scripted), Canvas rendering, pan/zoom/selection/inspector, scenario loading and playback controls already exist. Mission 002 replaces the scripted playback with an authoritative world model.
+
+- [ ] Define typed warehouse, station, obstacle, robot, and mission models as engine-owned mutable state with validated commands (see API_CONTRACTS.md).
+- [ ] Implement the deterministic discrete-tick simulation loop with invariant checks.
+- [ ] Render grid, stations, obstacles, and robots on Canvas *(renderer exists; connect it to engine snapshots)*.
+- [ ] Add pan, zoom, selection, and entity inspector *(exists; extend for new entities such as closures)*.
+- [ ] Add scenario loading and simulation playback controls *(exists; switch to the engine source)*.
 
 ## Mission 003 — Missions and pathfinding
 

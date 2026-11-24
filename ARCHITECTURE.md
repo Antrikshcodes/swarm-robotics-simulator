@@ -54,6 +54,13 @@ src/
 
 Adapt to the generated scaffold if it has a better idiomatic structure; preserve the separation of concerns.
 
+### Current implementation (Mission 001)
+
+- `src/engine/` currently contains `layout.ts` (ASCII map parser), `scenario.ts` (definitions, compilation and validation), `demo-playback.ts` and `scenarios/`. `DemoPlayback` implements `SimulationSource` (`step`, `reset`, `seek`, `getSnapshot`) by replaying hand-authored robot programs. It is deterministic and React-free, but it performs **no** planning, reservation, collision prevention, deadlock or recovery logic.
+- The planned `pathfinding/`, `coordination/`, `reservations/`, `deadlock/`, `recovery/`, `scheduler/` modules and `simulation-loop.ts` do not exist yet. The real engine should implement the same `SimulationSource` interface and emit the snapshot type in `src/types/simulation.ts` so that the UI does not change.
+- Wall-clock pacing lives in `components/layout/playback-driver.tsx`; the engine never owns timers.
+- The Canvas renderer (`src/lib/render/warehouse-renderer.ts`) is a pure function of snapshot + view + options. `useWarehouseRenderer` draws on demand outside React renders.
+
 ## Engine boundaries
 
 ### World model

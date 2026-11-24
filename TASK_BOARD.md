@@ -12,21 +12,33 @@ Track work here. Keep statuses current and link code changes where practical.
 
 ## Current milestone: Mission 001 — Frontend foundation
 
+Branch: `feat/mission-001-frontend` (not merged). Implementation tasks sit in **Review** until the independent Codex review (M1-09) completes.
+
 | ID | Task | Status | Owner |
 |---|---|---|---|
 | M0-01 | Create GitHub repository | Done | Project owner |
 | M0-02 | Add source-of-truth documentation | Done | ChatGPT / GitHub |
-| M0-03 | Clone repository locally | Todo | Project owner |
-| M1-01 | Inspect existing repository and git state | Todo | Claude Code |
-| M1-02 | Scaffold Next.js + TypeScript + Tailwind | Todo | Claude Code |
-| M1-03 | Establish design tokens and typography | Todo | Claude Code |
-| M1-04 | Build application shell and navigation | Todo | Claude Code |
-| M1-05 | Build Overview layout foundation | Todo | Claude Code |
-| M1-06 | Build Simulation Studio layout foundation | Todo | Claude Code |
-| M1-07 | Add placeholder routes for planned sections | Todo | Claude Code |
-| M1-08 | Run lint, typecheck, build, and route checks | Todo | Claude Code |
+| M0-03 | Clone repository locally | Done | Project owner |
+| M1-01 | Inspect existing repository and git state | Done | Claude Code |
+| M1-02 | Scaffold Next.js + TypeScript + Tailwind (+ shadcn/ui, Zustand, Framer Motion, Vitest) | Review | Claude Code |
+| M1-03 | Establish design tokens and typography | Review | Claude Code |
+| M1-04 | Build application shell and navigation | Review | Claude Code |
+| M1-05 | Build Overview page | Review | Claude Code |
+| M1-06 | Build Simulation Studio (canvas, toolbar, inspector, playback, metrics, scenarios) | Review | Claude Code |
+| M1-07 | Build Fleet, Missions, Incidents, Analytics, Settings routes | Review | Claude Code |
+| M1-08 | Run lint, typecheck, tests, build, and route/interaction checks | Done | Claude Code |
 | M1-09 | Independent review of Mission 001 | Todo | Codex |
 | M1-10 | Resolve review findings and approve milestone | Todo | Claude Code + project owner |
+
+### M1-08 verification record
+
+Run on `feat/mission-001-frontend`, Node 24, Next.js 16.4.6:
+
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` — passes (strict)
+- `npm test` — 20/20 passing (determinism, seek/reset, mission lifecycle, scripted fault, narrow-aisle timing, single-custody, script overlap/swap audit)
+- `npm run build` — all 7 routes prerendered as static
+- Manual browser checks at 1440×900, 1280×720 and 375×812: every route, sidebar navigation, scenario switching (toolbar and top bar), robot/station/cell selection and inspector, zoom/fit/reset/wheel/pan, grid and overlay toggles, play/pause/step/reset, speed, timeline seek, event-strip jump, incident replay, settings persistence and restore
 
 ## Next milestones
 
