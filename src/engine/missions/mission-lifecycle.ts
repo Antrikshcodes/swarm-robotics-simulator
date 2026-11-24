@@ -12,7 +12,7 @@ import { err, ok, type Result } from "../core/result";
  * - `assigned` / `to-pickup` → `queued` (requeue) when the pickup becomes
  *   unusable before pickup, e.g. a failed robot is standing on the station.
  * - `recovery-required` is reachable from any active state when the robot
- *   fails. Recovery itself (reassignment, custody transfer) is Mission 006.
+ *   fails. Recovery itself (reassignment, custody transfer) is Mission 004.
  * - `completed` and `cancelled` are terminal.
  */
 const ACTIVE: readonly MissionState[] = ["assigned", "to-pickup", "picking-up", "carrying", "to-dropoff", "dropping-off"];

@@ -158,7 +158,7 @@ export function AnalyticsDashboard() {
         </Table>
       </Panel>
 
-      <PlannedNote mission="Mission 007">
+      <PlannedNote mission="Later mission">
         <BarChart3 className="mr-1 inline size-3.5 align-[-2px]" />
         Derived congestion measures (per-cell occupancy heat from the movement log, blocked-wait time per aisle),
         queue wait time per mission and cross-scenario comparison are planned. Waiting ticks above come from the

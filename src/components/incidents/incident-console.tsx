@@ -23,9 +23,9 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
   "robot-failed": {
     label: "Robot failure",
     icon: OctagonAlert,
-    mission: "Mission 006",
+    mission: "Mission 004",
     planned:
-      "Today the engine halts the robot, keeps package custody with it and marks the mission recovery-required. The recovery manager will transfer custody explicitly and reassign the mission without losing delivery history.",
+      "Today the engine halts the robot, keeps package custody with it, marks the mission recovery-required, holds its cell permanently and makes other robots plan around it. The recovery manager will transfer custody explicitly and reassign the mission without losing delivery history.",
   },
   "robot-blocked": {
     label: "Blocked robot",
@@ -44,9 +44,9 @@ const KIND: Record<IncidentKind, { label: string; icon: typeof OctagonAlert; pla
   "aisle-closure": {
     label: "Aisle closure",
     icon: Construction,
-    mission: "Mission 006",
+    mission: "Later mission",
     planned:
-      "Closed cells are excluded from new A* routes and affected robots replan on their next tick. Robots already on a closed cell may leave it. Richer closure tooling (multi-cell selection, scheduled reopen) comes later.",
+      "Closed cells are excluded from new space-time routes; affected robots release their reservations and replan on the next tick. Robots already on a closed cell may leave it. Richer closure tooling (multi-cell selection, scheduled reopen) comes later.",
   },
 };
 

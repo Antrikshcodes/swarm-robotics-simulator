@@ -2,6 +2,26 @@
 
 Notable project changes are recorded here.
 
+## 2026-11-24 — Mission 003: multi-robot coordination (`feat/mission-001-frontend`)
+
+### Added
+- `src/engine/coordination`: time-indexed reservation table (cells, directed edges, holds), windowed cooperative space-time A* with exact distance heuristic, cached distance maps, `Coordinator` (prioritised replanning, right-of-way preemption, cell claiming, wait-for graph, decision log, stats), and `resolveMoves` commit-time check.
+- Mission priority (`normal`, `high`, `urgent`) for assignment order and movement priority; seeded priority mix in scenarios; `add-mission` accepts `priority`.
+- Snapshot `coordination` block (reservations, holds, wait-for graph, decisions, stats) and per-robot `priority`, `plan`, `planStatus`, `coordination`, `waitingFor`.
+- Events `right-of-way`, `conflict-prevented`, `mission-requeued`.
+- Studio: reserved cells, planned stops, wait-for arrows, priority flags, coordination chip, inspector coordination section and fleet coordination panel; Reservations (Y) and Wait-for (W) toggles; priority in mission form, Missions and Fleet tables.
+- `npm run bench` scaling benchmark; 92 tests.
+
+### Changed
+- Sequential occupancy guard, step-aside and yield rule replaced by reservation-based coordination.
+- Assignment uses cached distance maps and serves urgent missions first.
+- Dock reservations cover only the handling window, not the dock forever.
+- Missions waiting on a station blocked by a failed robot are requeued; the feed skips such stations.
+
+### Fixed
+- Robots arriving at a charger or home could stay in "moving" and never charge.
+- Low-battery robots could not use another robot's home charger while that robot was out working.
+
 ## 2026-11-24 — Mission 002: real simulation engine (`feat/mission-001-frontend`)
 
 ### Added

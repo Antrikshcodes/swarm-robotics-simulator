@@ -39,43 +39,37 @@ Status: implementation complete on `feat/mission-001-frontend`, awaiting indepen
 - [x] Basic safety: sequential occupancy guard (no collisions, no swaps), bounded-wait replanning.
 - [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 003 — Scheduling and operator tooling
+## Mission 003 — Multi-robot coordination
 
-Much of the original Mission 003 (A*, queue, assignment, live task creation, path visualisation) landed in Mission 002. Remaining:
+Status: implementation complete on `feat/mission-001-frontend`, awaiting independent review.
 
-- [ ] Mission priorities, deadlines and assignment beyond greedy nearest-robot (e.g. batch / Hungarian assignment).
-- [ ] Multi-cell aisle closure tooling (drag-select a segment) and scheduled reopen.
-- [ ] Scenario editor or import for custom layouts.
-- [ ] Engine checkpoints for faster long-range seek.
+- [x] Time-indexed cell reservations with ownership, holds, release and expiry.
+- [x] Directed-edge reservations and head-on swap prevention at planning time (plus commit-time re-check).
+- [x] Cooperative space-time A* with waiting actions, bounded horizon and deterministic order.
+- [x] Prioritised multi-robot scheduling: mission urgency, carry bonus, aging; right-of-way preemption.
+- [x] Conflict resolution recorded as decisions and engine events; wait-for graph exposed.
+- [x] Dynamic route updates: closures, failures, cancellations release and rebuild reservations.
+- [x] Studio visualisation of reservations, waits, priorities and coordination status.
+- [x] Scaling benchmark (4–32 robots).
+- [ ] Independent review (Codex) and resolution of findings.
 
-## Mission 004 — Multi-robot coordination and safety
+## Mission 004 — Deadlock handling and failure recovery
 
-- [ ] Implement time-indexed cell reservations (replace the occupancy guard's "free right now" check).
-- [ ] Implement directed-edge reservations and head-on swap prevention at planning time *(swaps are already impossible at execution time and checked by invariants)*.
-- [ ] Add conflict-aware replanning.
-- [x] Invariant checks for collisions, swaps, custody and mission consistency *(Mission 002)*; [ ] adversarial / property-based tests.
+- [ ] Detect wait cycles on the wait-for graph and prolonged blocked dependencies after the commit phase.
+- [ ] Bounded, deterministic resolution (e.g. temporary priority inversion, backing a robot out, joint planning for the pair).
+- [ ] Test that congestion is not classified as deadlock.
+- [ ] Recover-robot command (`failed → recovering → idle`), custody transfer and reassignment of `recovery-required` missions.
+- [ ] Release a failed robot's permanent hold when it is recovered or towed.
 
-## Mission 005 — Deadlock detection and recovery
+Already in place from earlier missions: failure state modelling, custody preservation with audit history, dynamic aisle closures with route invalidation and replanning, no simulation reset required.
 
-- [ ] Detect wait cycles and prolonged blocked dependencies.
-- [ ] Implement a bounded recovery policy for narrow aisles.
-- [ ] Test that congestion is not incorrectly classified as deadlock.
+## Mission 005 — Metrics, polish, and judging scenarios
 
-## Mission 006 — Failure recovery and dynamic changes
-
-- [ ] Model robot failure states.
-- [ ] Preserve package custody and delivery history.
-- [ ] Transfer/reassign work through explicit atomic state changes.
-- [ ] Implement dynamic aisle closures and route invalidation/replanning.
-- [ ] Verify no simulation reset is required.
-
-## Mission 007 — Metrics, polish, and judging scenarios
-
-- [ ] Calculate completed jobs, waiting time, congestion, and utilisation from event data.
-- [ ] Add scenario controls for all required demonstrations.
-- [ ] Add event log and explainable decision traces.
-- [ ] Run end-to-end tests and performance checks.
-- [ ] Prepare concise demo flow and technical explanation.
+- [x] Completed jobs, waiting time and utilisation from engine state/events *(Missions 002–003)*; [ ] congestion measure (cell-occupancy heat, blocked-wait per aisle).
+- [ ] Scenario controls for all required demonstrations (narrow passage, failure while carrying, dynamic blockage, concurrent deliveries) with one-click setup.
+- [x] Event log and coordination decision trace *(Missions 002–003)*; [ ] explainable per-robot timeline.
+- [ ] End-to-end UI tests and larger-map performance checks.
+- [ ] Concise demo flow and technical explanation.
 
 ## Delivery rule
 

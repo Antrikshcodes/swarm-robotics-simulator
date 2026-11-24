@@ -6,7 +6,7 @@ import { err, ok, type Result } from "../core/result";
  *
  * Status is recomputed every tick from what the robot did, so most
  * operational states can follow one another. The hard rules are:
- *  - `failed` is only left via `recovering` (recovery workflow: Mission 006)
+ *  - `failed` is only left via `recovering` (recovery workflow: Mission 004)
  *  - `recovering` returns to `idle`
  *  - nothing jumps straight from `failed` back into operation
  */

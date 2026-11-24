@@ -67,6 +67,32 @@ Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review*
 - `npm run build` — all 7 routes prerendered
 - Browser (1440×900): engine-driven movement in all three scenarios; narrow-aisle head-on wait and replan; high-density scheduled R-07 failure; Mark failed (mission → recovery-required, custody retained); close / reopen cell (inspector and Incidents page); queue and cancel mission; all routes render without console errors
 
+## Current milestone: Mission 003 — Multi-robot coordination
+
+Same branch (`feat/mission-001-frontend`). Implementation tasks are in **Review** pending independent review.
+
+| ID | Task | Status | Owner |
+|---|---|---|---|
+| M3-01 | Inspect engine, coordination needs and tests | Done | Claude Code |
+| M3-02 | Time-indexed reservation table (cells, directed edges, holds, release, expiry) + tests | Review | Claude Code |
+| M3-03 | Space-time cooperative A* (waits, swaps, horizon, partial plans, dock windows) + tests | Review | Claude Code |
+| M3-04 | Commit-time move resolver (same cell, occupied, swap, cascades) + tests | Review | Claude Code |
+| M3-05 | Coordinator: prioritised replanning, right-of-way preemption, cell claiming, wait-for graph, decisions | Review | Claude Code |
+| M3-06 | Engine integration: four-phase tick, mission priority, requeue at failed stations, closure/failure release | Review | Claude Code |
+| M3-07 | Studio: reservations, planned stops, wait-for arrows, priority flags, coordination panel and chip | Review | Claude Code |
+| M3-08 | Scaling benchmark (4–32 robots) | Done | Claude Code |
+| M3-09 | Lint, typecheck, tests, build, browser verification | Done | Claude Code |
+| M3-10 | Independent review of Mission 003 | Todo | Codex |
+
+### M3-09 verification record
+
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` — passes (strict)
+- `npm test` — 92/92 passing across 9 files (reservation table 10, space-time planner 11, resolver 6, coordinator 5, engine coordination 11, plus Mission 002 suites), including 2 000-tick reservation-consistency checks for every scenario and a 5 000-tick run
+- `npm run build` — all 7 routes prerendered
+- `npm run bench` — 0 commit rejections at 4, 8, 16, 24 and 32 robots; 0.15–1.17 ms/tick mean
+- Browser (1440×900): reservations, planned stops and priority flags in high-density; live wait (R-01 waiting for R-02) with arrow, inspector and decision log in narrow aisle; toolbar toggles; all routes render without console errors
+
 ## Next milestones
 
 Detailed scope and acceptance criteria are in [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md).
