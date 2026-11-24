@@ -236,17 +236,45 @@ export interface ThroughputBucket {
 }
 
 export function throughputBuckets(snapshot: SimulationSnapshot, bucketSize = 25): ThroughputBucket[] {
-  const count = Math.max(1, Math.ceil(snapshot.tick / bucketSize));
+  const safeSize = Math.max(1, bucketSize);
+  const count = Math.max(1, Math.ceil(snapshot.tick / safeSize));
   const buckets = Array.from({ length: count }, (_, i) => ({
-    start: i * bucketSize,
-    end: (i + 1) * bucketSize,
+    start: i * safeSize,
+    end: (i + 1) * safeSize,
     deliveries: 0,
   }));
   for (const tick of snapshot.deliveryTicks) {
-    const index = Math.min(count - 1, Math.floor((tick - 1) / bucketSize));
+    const index = Math.max(0, Math.min(count - 1, Math.floor((tick - 1) / safeSize)));
     buckets[index].deliveries += 1;
   }
   return buckets;
+}
+
+export interface CycleStats {
+  readonly count: number;
+  readonly min: number;
+  readonly median: number;
+  readonly max: number;
+  readonly mean: number;
+}
+
+export function missionCycleStats(snapshot: SimulationSnapshot): CycleStats | null {
+  const durations = snapshot.missions
+    .filter((m) => m.state === "completed" && m.completedTick !== null)
+    .map((m) => Math.max(0, (m.completedTick ?? m.createdTick) - m.createdTick))
+    .sort((a, b) => a - b);
+  if (durations.length === 0) return null;
+  const sum = durations.reduce((acc, d) => acc + d, 0);
+  const mid = Math.floor(durations.length / 2);
+  const median =
+    durations.length % 2 === 1 ? durations[mid] : (durations[mid - 1] + durations[mid]) / 2;
+  return {
+    count: durations.length,
+    min: durations[0],
+    median,
+    max: durations[durations.length - 1],
+    mean: sum / durations.length,
+  };
 }
 
 export function averageCycleTicks(snapshot: SimulationSnapshot): number | null {

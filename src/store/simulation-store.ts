@@ -9,6 +9,7 @@ import {
   type WarehouseEngine,
 } from "@/engine";
 import type { EntitySelection, SimulationSnapshot } from "@/types/simulation";
+import { appendArchivedRun, summarizeSnapshotRun, type ArchivedRunSummary } from "./run-archive";
 
 export type PlaybackStatus = "ready" | "running" | "paused";
 
@@ -33,6 +34,7 @@ interface SimulationState {
   steppedAt: number;
   selection: EntitySelection | null;
   feedback: CommandFeedback | null;
+  runArchive: readonly ArchivedRunSummary[];
 
   play: () => void;
   pause: () => void;
@@ -44,6 +46,8 @@ interface SimulationState {
   setSpeed: (speed: PlaybackSpeed) => void;
   loadScenario: (scenarioId: string) => void;
   select: (selection: EntitySelection | null) => void;
+  archiveCurrentRun: () => void;
+  clearRunArchive: () => void;
   /** Send a world command (add mission, close aisle, fail robot, …) to the engine. */
   dispatch: (command: EngineCommand) => CommandResult;
 }
@@ -54,6 +58,7 @@ interface SimulationState {
  */
 const engine: WarehouseEngine = createSimulationSource(DEFAULT_SCENARIO_ID);
 let feedbackSeq = 0;
+let archiveSeq = 0;
 
 const now = () => (typeof performance === "undefined" ? 0 : performance.now());
 
@@ -75,6 +80,7 @@ export const useSimulationStore = create<SimulationState>()((set, get) => ({
   steppedAt: 0,
   selection: null,
   feedback: null,
+  runArchive: [],
 
   play: () => {
     if (get().status === "running") return;
@@ -102,8 +108,20 @@ export const useSimulationStore = create<SimulationState>()((set, get) => ({
   },
 
   reset: () => {
+    const prev = get().snapshot;
+    let nextArchive = get().runArchive;
+    if (prev.tick > 0) {
+      archiveSeq += 1;
+      nextArchive = appendArchivedRun(nextArchive, summarizeSnapshotRun(prev, archiveSeq, "reset"));
+    }
     engine.dispatch({ type: "reset" });
-    set({ snapshot: engine.getSnapshot(), status: "ready", maxTick: 0, steppedAt: 0 });
+    set({
+      snapshot: engine.getSnapshot(),
+      status: "ready",
+      maxTick: 0,
+      steppedAt: 0,
+      runArchive: nextArchive,
+    });
   },
 
   seek: (tick) => {
@@ -122,10 +140,19 @@ export const useSimulationStore = create<SimulationState>()((set, get) => ({
 
   loadScenario: (scenarioId) => {
     if (scenarioId === get().scenarioId) return;
+    const prev = get().snapshot;
     const result = engine.dispatch({ type: "load-scenario", scenarioId });
     if (!result.ok) {
       set({ feedback: feedback(result) });
       return;
+    }
+    let nextArchive = get().runArchive;
+    if (prev.tick > 0) {
+      archiveSeq += 1;
+      nextArchive = appendArchivedRun(
+        nextArchive,
+        summarizeSnapshotRun(prev, archiveSeq, "scenario-switch"),
+      );
     }
     set({
       scenarioId,
@@ -134,8 +161,23 @@ export const useSimulationStore = create<SimulationState>()((set, get) => ({
       maxTick: 0,
       steppedAt: 0,
       selection: null,
+      runArchive: nextArchive,
     });
   },
+
+  archiveCurrentRun: () => {
+    const current = get().snapshot;
+    if (current.tick === 0) return;
+    archiveSeq += 1;
+    set((s) => ({
+      runArchive: appendArchivedRun(
+        s.runArchive,
+        summarizeSnapshotRun(current, archiveSeq, "manual"),
+      ),
+    }));
+  },
+
+  clearRunArchive: () => set({ runArchive: [] }),
 
   select: (selection) => {
     if (selection?.kind === "robot") {
